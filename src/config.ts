@@ -29,6 +29,20 @@ export type Segment = {
 
 export type LeadOption = { value: string; label: string }
 
+/** A blog/CMS post in the optional "Send a blog post" composer picker. The
+ *  heavy body is fetched on demand (loadPostMarkdown) when a post is chosen,
+ *  so this list stays light + serializable. The package is CMS-agnostic —
+ *  the site maps its own CMS records into this shape. */
+export type PostListItem = {
+  id: string
+  title: string
+  slug: string
+  publishedAt: string | null
+  category: string | null
+  excerpt: string | null
+  cover: string | null
+}
+
 export type SupabaseEnv = { url?: string; key?: string }
 
 export type MailerConfig = {
@@ -68,6 +82,19 @@ export type MailerConfig = {
   notifyEmail?: string | null
   /** Extra site-local nav tabs appended to the shared AdminNav (e.g. orangish Roadmap). */
   extraNavTabs?: { href: string; label: string }[]
+  /** OPTIONAL "Send a blog post" composer mode. The package stays CMS-agnostic:
+   *  the site injects both functions (Sanity, MDX, a DB, …). When `loadPosts`
+   *  is set the composer surfaces a Newsletter|Blog-post toggle + post picker;
+   *  picking a post calls the per-post route which delegates to
+   *  `loadPostMarkdown`. Omit entirely → composer is newsletter-only. */
+  compose?: {
+    /** List published posts for the picker. Failure → empty picker (never breaks
+     *  the newsletter composer). Server-side, called in the compose page. */
+    loadPosts?: () => Promise<PostListItem[]>
+    /** Render one post (by slug) into the Markdown the composer speaks +
+     *  a subject. Called by the per-post route on selection. */
+    loadPostMarkdown?: (slug: string) => Promise<{ subject: string; body_md: string }>
+  }
 }
 
 export function defineConfig(c: MailerConfig): MailerConfig {

@@ -14,7 +14,7 @@
 // Canonical donor: extonsports-v1 / squashtigers-v2 app/admin/compose/page.tsx.
 
 import { redirect } from 'next/navigation'
-import type { MailerConfig } from '../../config'
+import type { MailerConfig, PostListItem } from '../../config'
 import { createSupabase } from '../../lib/supabase'
 import { createAuth } from '../../lib/auth'
 import ComposeClient, { type RecipientRow } from './ComposeClient'
@@ -45,6 +45,14 @@ export function createComposePage(cfg: MailerConfig) {
       loadError = 'Mailer Supabase env not configured on this deployment.'
     }
 
+    // OPTIONAL "Send a blog post" mode. Only loads when the site injects a
+    // CMS loader; a load failure just yields an empty picker (default []) and
+    // never breaks the newsletter composer.
+    let posts: PostListItem[] = []
+    if (cfg.compose?.loadPosts) {
+      posts = await cfg.compose.loadPosts().catch(() => [])
+    }
+
     return (
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 20px 48px' }}>
         <ComposeClient
@@ -59,6 +67,7 @@ export function createComposePage(cfg: MailerConfig) {
             signupContext: cfg.email.signupContext || `you signed up at ${cfg.brandName}`,
             contactEmail: cfg.email.contactEmail || null,
           }}
+          posts={posts}
         />
       </main>
     )

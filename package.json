@@ -14,6 +14,7 @@
     "./api/subscriber-id": "./src/api/subscriber-id.ts",
     "./api/subscribers-import": "./src/api/subscribers-import.ts",
     "./api/compose-send": "./src/api/compose-send.ts",
+    "./api/compose-post": "./src/api/compose-post.ts",
     "./api/compose-test-send": "./src/api/compose-test-send.ts",
     "./api/upload-image": "./src/api/upload-image.ts",
     "./api/welcome": "./src/api/welcome.ts",

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef } from 'react'
-import type { Theme, Segment } from '../../config'
+import type { Theme, Segment, PostListItem } from '../../config'
 import { markdownToEmailHtml } from '../../lib/email'
 import { valuesFromTags } from '../../lib/segments'
 
@@ -21,7 +21,7 @@ export type PreviewFooter = {
 }
 
 export default function ComposeClient({
-  recipients, loadError, adminEmail, theme, segments, brandName, previewFooter,
+  recipients, loadError, adminEmail, theme, segments, brandName, previewFooter, posts = [],
 }: {
   recipients: RecipientRow[]
   loadError: string | null
@@ -30,8 +30,12 @@ export default function ComposeClient({
   segments: Segment[]
   brandName: string
   previewFooter: PreviewFooter
+  /** OPTIONAL blog posts for the "Send a blog post" mode. Empty/absent →
+   *  composer is newsletter-only (the mode toggle + picker don't render). */
+  posts?: PostListItem[]
 }) {
   const t = theme
+  const blogEnabled = posts.length > 0
 
   const STARTER_BODY = `# Hello from ${brandName}!
 
@@ -50,6 +54,11 @@ Questions? Just reply to this email.
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState(STARTER_BODY)
+  // Compose source: blank newsletter vs. an existing blog post (optional mode).
+  const [mode, setMode] = useState<'newsletter' | 'blog'>('newsletter')
+  const [chosenPost, setChosenPost] = useState<PostListItem | null>(null)
+  const [loadingPost, setLoadingPost] = useState(false)
+  const [postSearch, setPostSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(() => new Set(recipients.map(r => r.id)))
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -248,10 +257,50 @@ Questions? Just reply to this email.
     } finally { setBusy(null) }
   }
 
+  // Load a blog post → prefill subject + Markdown body, then reveal the
+  // editor. From here it's the identical preview / test / send flow.
+  async function pickPost(post: PostListItem) {
+    setLoadingPost(true)
+    setFlash(null)
+    try {
+      const res = await fetch(`/api/admin/compose/post?slug=${encodeURIComponent(post.slug)}`)
+      const j = await res.json()
+      if (!res.ok) { setFlash({ kind: 'err', msg: j.error || 'Could not load that post.' }); return }
+      setSubject(j.subject || post.title)
+      setBody(j.body_md || '')
+      setChosenPost(post)
+    } catch {
+      setFlash({ kind: 'err', msg: 'Could not load that post.' })
+    } finally {
+      setLoadingPost(false)
+    }
+  }
+
+  // The composer shows for newsletters always, and (in blog mode) only once a
+  // post has been chosen — before that, the picker takes over the view.
+  const showComposer = mode === 'newsletter' || !!chosenPost
   const sendDisabled = !subject.trim() || !body.trim() || selected.size === 0 || busy !== null
 
   return (
     <div>
+      {/* ── compose source toggle (only when blog mode is available) ── */}
+      {blogEnabled && <ModeToggle t={t} mode={mode} setMode={setMode} />}
+
+      {blogEnabled && mode === 'blog' && (
+        <BlogBar
+          t={t}
+          btnStyle={btnStyle}
+          chosenPost={chosenPost}
+          loading={loadingPost}
+          onChange={() => setChosenPost(null)}
+          posts={posts}
+          search={postSearch}
+          setSearch={setPostSearch}
+          onPick={pickPost}
+        />
+      )}
+
+      {showComposer && (<>
       {/* ── top bar ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
         <input
@@ -384,6 +433,7 @@ Questions? Just reply to this email.
           busy={busy === 'send'}
         />
       )}
+      </>)}
     </div>
   )
 }
@@ -486,6 +536,118 @@ function ConfirmSendModal({ t, btnStyle, subject, recipientCount, onCancel, onCo
       </div>
     </div>
   )
+}
+
+// ── Compose-source toggle (Newsletter | Blog post) ─────────────────
+
+function ModeToggle({ t, mode, setMode }: { t: Theme; mode: 'newsletter' | 'blog'; setMode: (m: 'newsletter' | 'blog') => void }) {
+  const tab = (key: 'newsletter' | 'blog', label: string, sub: string) => {
+    const active = mode === key
+    return (
+      <button
+        onClick={() => setMode(key)}
+        style={{
+          flex: 1, padding: '11px 16px', border: 'none', cursor: 'pointer', textAlign: 'left',
+          background: active ? t.panelBg : 'transparent',
+          borderRadius: 9,
+          boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 800, color: active ? t.text : t.mutedText }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: active ? t.accent : t.faintText, marginTop: 2 }}>{sub}</div>
+      </button>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', gap: 4, background: t.headerBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: 4, marginBottom: 16 }}>
+      {tab('newsletter', '✍️  Write a newsletter', 'Start from a blank canvas')}
+      {tab('blog', '📰  Send a blog post', 'Turn a published post into an email')}
+    </div>
+  )
+}
+
+// ── Blog-post picker / chosen banner ───────────────────────────────
+
+function BlogBar({
+  t, btnStyle, chosenPost, loading, onChange, posts, search, setSearch, onPick,
+}: {
+  t: Theme
+  btnStyle: BtnStyle
+  chosenPost: PostListItem | null
+  loading: boolean
+  onChange: () => void
+  posts: PostListItem[]
+  search: string
+  setSearch: (s: string) => void
+  onPick: (p: PostListItem) => void
+}) {
+  // A post is chosen → compact banner above the editor.
+  if (chosenPost) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: t.headerBg, border: `1px solid ${t.border}`, borderRadius: 10, marginBottom: 14 }}>
+        {chosenPost.cover && <img src={chosenPost.cover} alt="" style={{ width: 46, height: 32, objectFit: 'cover', borderRadius: 5, flexShrink: 0 }} />}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: t.accent }}>From blog post</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chosenPost.title}</div>
+        </div>
+        <button onClick={onChange} disabled={loading} style={btnStyle('ghost', loading)}>Change post</button>
+      </div>
+    )
+  }
+
+  // No post yet → searchable list.
+  const q = search.trim().toLowerCase()
+  const filtered = q
+    ? posts.filter(p => p.title.toLowerCase().includes(q) || (p.excerpt || '').toLowerCase().includes(q))
+    : posts
+
+  return (
+    <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', borderBottom: `1px solid ${t.borderSoft}`, background: t.headerBg }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: t.text, marginBottom: 8 }}>Pick a post to send</div>
+        <input
+          placeholder={posts.length ? `Search ${posts.length} posts…` : 'Search posts…'}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '9px 14px', fontSize: 14, border: `1px solid ${t.border}`, borderRadius: 9999, background: t.panelBg, color: t.text }}
+        />
+      </div>
+      {loading && <div style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, color: t.accent, background: t.headerBg }}>Loading post…</div>}
+      <div style={{ maxHeight: 440, overflowY: 'auto' }}>
+        {filtered.length === 0 && (
+          <div style={{ padding: '28px 16px', textAlign: 'center', color: t.mutedText, fontSize: 13 }}>
+            {posts.length === 0 ? 'No blog posts found. Publish a post first.' : 'No posts match your search.'}
+          </div>
+        )}
+        {filtered.map(p => (
+          <button
+            key={p.id}
+            onClick={() => onPick(p)}
+            disabled={loading}
+            style={{ display: 'flex', gap: 12, width: '100%', textAlign: 'left', alignItems: 'center', padding: '10px 16px', border: 'none', borderBottom: `1px solid ${t.borderSoft}`, background: t.panelBg, cursor: loading ? 'wait' : 'pointer' }}
+          >
+            {p.cover
+              ? <img src={p.cover} alt="" style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+              : <div style={{ width: 56, height: 40, borderRadius: 6, background: t.headerBg, flexShrink: 0 }} />}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</div>
+              <div style={{ fontSize: 11.5, color: t.mutedText, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {[p.category, fmtDate(p.publishedAt)].filter(Boolean).join(' · ')}{p.excerpt ? ` — ${p.excerpt}` : ''}
+              </div>
+            </div>
+            <span style={{ fontSize: 18, color: t.accent, flexShrink: 0 }}>→</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch { return '' }
 }
 
 // ── helpers ────────────────────────────────────────────────────────
