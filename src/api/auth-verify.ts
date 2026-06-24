@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
+import { NOTRACK_COOKIE } from '../config'
 import { createAuth } from '../lib/auth'
 
 export function createVerifyRoute(cfg: MailerConfig) {
@@ -30,7 +31,10 @@ export function createVerifyRoute(cfg: MailerConfig) {
 
     const sessionToken = auth.signToken({ email: v.payload.email, kind: 'session' }, auth.SESSION_TTL)
     const res = NextResponse.redirect(new URL('/admin', req.url), 303)
-    res.headers.set('Set-Cookie', auth.buildSessionCookie(sessionToken))
+    res.headers.append('Set-Cookie', auth.buildSessionCookie(sessionToken))
+    // Exclude the operator's own browser from public-site analytics on login.
+    // Not httpOnly so the Traffic-page toggle can read/clear it. 2-year, Lax.
+    res.headers.append('Set-Cookie', `${NOTRACK_COOKIE}=1; Path=/; Max-Age=63072000; SameSite=Lax; Secure`)
     return res
   }
 

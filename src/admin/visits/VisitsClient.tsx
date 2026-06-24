@@ -13,7 +13,9 @@
 //
 // Canonical donor: squashtigers-v2 app/admin/visits/page.tsx.
 
+import { useState, useEffect } from 'react'
 import type { Theme, Segment } from '../../config'
+import { NOTRACK_COOKIE } from '../../config'
 import { valuesFromTags } from '../../lib/segments'
 
 export type VisitRow = {
@@ -114,6 +116,42 @@ function brandDomain(appUrl: string, brandName: string): string {
   }
 }
 
+// "Don't count my visits" toggle. Sets/clears the notrack cookie this
+// browser sends with every /api/track beacon, so the operator's own
+// browsing is excluded from the stats. Admin login auto-sets it; this is
+// for other devices (phone, incognito) or to turn it back off.
+function NotrackToggle({ t }: { t: Theme }) {
+  const [excluded, setExcluded] = useState<boolean | null>(null)
+  useEffect(() => {
+    setExcluded(document.cookie.split('; ').some(c => c === `${NOTRACK_COOKIE}=1`))
+  }, [])
+  if (excluded === null) return null // avoid SSR/client flash until mounted
+  function toggle() {
+    const next = !excluded
+    document.cookie = next
+      ? `${NOTRACK_COOKIE}=1; Path=/; Max-Age=63072000; SameSite=Lax`
+      : `${NOTRACK_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+    setExcluded(next)
+  }
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, padding: '9px 14px', borderRadius: 10, border: `1px solid ${t.border}`, background: t.panelBg, marginBottom: 26 }}>
+      <span style={{ fontSize: 13, color: t.mutedText }}>
+        This browser is {excluded
+          ? <b style={{ color: t.text }}>excluded from</b>
+          : <b style={{ color: t.text }}>counted in</b>} traffic.
+      </span>
+      <button onClick={toggle} style={{
+        fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '5px 12px', borderRadius: 7,
+        border: excluded ? `1px solid ${t.border}` : 'none',
+        background: excluded ? 'transparent' : t.accent,
+        color: excluded ? t.mutedText : t.accentText,
+      }}>
+        {excluded ? 'Start counting it' : "Don't count my visits"}
+      </button>
+    </div>
+  )
+}
+
 export default function VisitsClient({
   visits, signups, theme, segments, brandName, appUrl, timezone, notConfigured,
 }: {
@@ -174,10 +212,11 @@ export default function VisitsClient({
       <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', color: t.text, margin: '0 0 6px 0' }}>
         Traffic
       </h1>
-      <p style={{ fontSize: 14, color: t.mutedText, margin: '0 0 28px 0' }}>
+      <p style={{ fontSize: 14, color: t.mutedText, margin: '0 0 16px 0' }}>
         Every visit to {domain} — last 30 days, bots excluded.
         {' '}For full charts (over-time, real-time) see the Vercel Analytics tab.
       </p>
+      <div><NotrackToggle t={t} /></div>
 
       {notConfigured ? (
         <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '28px 22px', color: t.mutedText, fontSize: 14, lineHeight: 1.6 }}>

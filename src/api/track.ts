@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
+import { NOTRACK_COOKIE } from '../config'
 import { createSupabase } from '../lib/supabase'
 
 // Lightweight bot detection from the user-agent. Not exhaustive — just
@@ -33,6 +34,10 @@ export function createTrackRoute(cfg: MailerConfig) {
   async function POST(req: NextRequest) {
     // Always succeed from the client's perspective.
     try {
+      // Owner opt-out: a browser carrying the notrack cookie (set on admin
+      // login or via the Traffic toggle) is never logged — keeps the
+      // operator's own visits out of the public-traffic stats.
+      if (req.cookies.get(NOTRACK_COOKIE)?.value === '1') return new NextResponse(null, { status: 204 })
       if (!supa.configured()) return new NextResponse(null, { status: 204 })
 
       let body: Record<string, string | null> = {}

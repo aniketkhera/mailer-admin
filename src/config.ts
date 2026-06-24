@@ -125,3 +125,8 @@ export function resolveAdminEmails(property: string): string {
 }
 
 export const DEFAULT_TIMEZONE = 'America/New_York'
+
+/** Cookie that opts a browser OUT of public-site analytics (set on admin
+ *  login + via the Traffic-page toggle). /api/track skips any request
+ *  carrying it, keeping the operator's own visits out of the stats. */
+export const NOTRACK_COOKIE = 'mailer_notrack'
