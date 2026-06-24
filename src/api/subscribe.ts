@@ -25,7 +25,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { createSupabase } from '../lib/supabase'
-import { segmentTag } from '../lib/segments'
+import { resolveSegmentTags } from '../lib/segments'
 import {
   sendOne,
   unsubscribeUrl,
@@ -75,13 +75,17 @@ export function createSubscribeRoute(cfg: MailerConfig) {
     }
 
     const source = str(body.source) || 'homepage'
-    const segTag = body.segment ? segmentTag(cfg.segments || [], str(body.segment)) : null
 
     // Acquisition context — client captures at submit time.
     const referrer = clean(body.referrer)
     const utm_source = clean(body.utm_source)
     const utm_medium = clean(body.utm_medium)
     const utm_campaign = clean(body.utm_campaign)
+
+    // Segment tags: explicit body[segment.key] (e.g. `sport`) or the generic
+    // `segment`, else inferred from a segment-named UTM. Accepts BOTH the
+    // public form's field and the admin's `segment` field.
+    const segTags = resolveSegmentTags(cfg.segments || [], body, { utmSource: utm_source, utmCampaign: utm_campaign })
 
     // Geo — Vercel sets these at the edge; null in local dev.
     const country = req.headers.get('x-vercel-ip-country') || null
@@ -116,7 +120,7 @@ export function createSubscribeRoute(cfg: MailerConfig) {
             first_name: first_name || null,
             last_name: last_name || null,
             source,
-            tags: segTag ? [segTag] : [],
+            tags: segTags,
             referrer,
             utm_source,
             utm_medium,

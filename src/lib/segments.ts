@@ -38,3 +38,31 @@ export function allSegmentValues(segments: Segment[]): { value: string; label: s
   for (const s of segments) for (const v of s.values) out.push({ value: v, label: labelize(v) })
   return out
 }
+
+function pickStr(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+/** Resolve segment tags for a PUBLIC signup body. For each configured
+ *  segment, take an explicit value from body[segment.key] (e.g. `sport`)
+ *  or the generic body.segment; else infer from utm_source / utm_campaign
+ *  (first token). Generalizes the old per-site deriveSport(), and accepts
+ *  BOTH the public form field name and the admin's generic `segment`. */
+export function resolveSegmentTags(
+  segments: Segment[],
+  body: Record<string, unknown>,
+  ctx?: { utmSource?: string | null; utmCampaign?: string | null },
+): string[] {
+  const firstToken = (v: unknown) => pickStr(v).toLowerCase().split(/[-_:./ ]/)[0]
+  const out: string[] = []
+  for (const s of segments) {
+    const explicit = pickStr(body[s.key]) || pickStr(body.segment)
+    let value: string | null = null
+    for (const cand of [explicit, ctx?.utmSource, ctx?.utmCampaign]) {
+      const tok = firstToken(cand)
+      if (tok && s.values.includes(tok)) { value = tok; break }
+    }
+    if (value) out.push(`${s.namespace}${value}`)
+  }
+  return out
+}
