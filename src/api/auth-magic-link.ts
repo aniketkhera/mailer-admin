@@ -44,8 +44,8 @@ export function createMagicLinkRoute(cfg: MailerConfig) {
       throw e
     }
 
-    const appUrl = cfg.appUrl.replace(/\/$/, '')
-    const link = `${appUrl}/api/auth/verify?token=${encodeURIComponent(token)}`
+    const base = signInBaseUrl(cfg, req)
+    const link = `${base}/api/auth/verify?token=${encodeURIComponent(token)}`
 
     try {
       await sendOne(cfg, {
@@ -62,6 +62,20 @@ export function createMagicLinkRoute(cfg: MailerConfig) {
   }
 
   return { POST }
+}
+
+// On a Vercel PREVIEW (or dev) the sign-in link points back at the SAME
+// deployment, so admin login is testable on the preview URL. PRODUCTION
+// always uses the fixed canonical cfg.appUrl (no host-header injection on
+// the live site). Only the admin sign-in link is affected — real subscriber
+// emails (sends / welcome / unsubscribe) always use cfg.appUrl.
+function signInBaseUrl(cfg: MailerConfig, req: NextRequest): string {
+  const env = process.env.VERCEL_ENV
+  if (env && env !== 'production') {
+    const host = req.headers.get('x-forwarded-host') || req.headers.get('host')
+    if (host) return `https://${host.replace(/\/+$/, '')}`
+  }
+  return cfg.appUrl.replace(/\/$/, '')
 }
 
 function signInEmailHtml(cfg: MailerConfig, link: string): string {
