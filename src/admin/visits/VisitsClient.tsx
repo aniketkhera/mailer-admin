@@ -1,0 +1,325 @@
+'use client'
+
+// Themed Traffic / Visits dashboard. Receives raw 30-day visit + funnel
+// signup rows (property-scoped by the page factory) and does all the
+// aggregation client-side: today/7d/30d stat cards, signup-rate, BarCards
+// (region / referrer / device / utm_source), per-segment signup bar cards,
+// and conversion-by-source + by-region tables.
+//
+// Every brand color is a theme token (t.*); semantic green/red stay literal.
+// The "today" bucket uses the configured IANA timezone (not a hardcoded ET
+// string). The old "Signups by sport" card is generalized to cfg.segments —
+// one bar card per configured segment, hidden entirely when none.
+//
+// Canonical donor: squashtigers-v2 app/admin/visits/page.tsx.
+
+import type { Theme, Segment } from '../../config'
+import { valuesFromTags } from '../../lib/segments'
+
+export type VisitRow = {
+  path: string | null
+  referrer: string | null
+  utm_source: string | null
+  utm_campaign: string | null
+  region: string | null
+  country: string | null
+  device: string | null
+  is_bot: boolean
+  created_at: string
+}
+
+export type SignupRow = {
+  referrer: string | null
+  utm_source: string | null
+  region: string | null
+  country: string | null
+  tags: string[]
+  subscribed_at: string
+}
+
+// ───────────────────────── aggregation helpers ─────────────────────────
+
+// Region label: always "<code> · <country>" when both resolve (NJ · US,
+// QC · CA, ALX · EG) so every row is uniformly qualified. Region alone if
+// no country; "—" if no region.
+function regionLabel(r: { region: string | null; country: string | null }): string {
+  if (!r.region) return '—'
+  return r.country ? `${r.region} · ${r.country}` : r.region
+}
+
+// Count rows by a string key (works for any row shape).
+function countByKey<T>(rows: T[], key: (r: T) => string): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const r of rows) {
+    const k = key(r)
+    m.set(k, (m.get(k) || 0) + 1)
+  }
+  return m
+}
+
+// Join visits + signups by a shared key → conversion rows.
+type ConvRow = { label: string; visits: number; signups: number; rate: number | null }
+function buildConversion<V, S>(
+  visits: V[], signups: S[],
+  vKey: (v: V) => string, sKey: (s: S) => string,
+): ConvRow[] {
+  const v = countByKey(visits, vKey)
+  const s = countByKey(signups, sKey)
+  const labels = new Set<string>([...v.keys(), ...s.keys()])
+  return [...labels]
+    .map(label => {
+      const visits = v.get(label) || 0
+      const signups = s.get(label) || 0
+      // rate is null (shown "—") when we have signups but no tracked
+      // visits — e.g. migrated/pre-logging subscribers. Avoids a
+      // misleading 0% or a divide-by-zero Infinity.
+      const rate = visits > 0 ? signups / visits : null
+      return { label, visits, signups, rate }
+    })
+    .filter(r => r.visits > 0 || r.signups > 0)
+    .sort((a, b) => b.visits - a.visits || b.signups - a.signups)
+}
+
+function tally(rows: VisitRow[], key: (v: VisitRow) => string | null): Array<{ label: string; count: number }> {
+  const map = new Map<string, number>()
+  for (const r of rows) {
+    const k = key(r) || '—'
+    map.set(k, (map.get(k) || 0) + 1)
+  }
+  return [...map.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)
+}
+
+// Collapse a full referrer URL to its hostname for grouping.
+function refHost(r: string | null): string {
+  if (!r) return 'Direct / none'
+  try {
+    const h = new URL(r).hostname.replace(/^www\./, '')
+    return h || 'Direct / none'
+  } catch {
+    return r.slice(0, 40)
+  }
+}
+
+// Derive a display domain from the brand's app URL (e.g.
+// "https://www.squashtigers.com" → "squashtigers.com"); falls back to the
+// brand name when the URL is missing/unparseable.
+function brandDomain(appUrl: string, brandName: string): string {
+  try {
+    const h = new URL(appUrl).hostname.replace(/^www\./, '')
+    return h || brandName
+  } catch {
+    return brandName
+  }
+}
+
+export default function VisitsClient({
+  visits, signups, theme, segments, brandName, appUrl, timezone, notConfigured,
+}: {
+  visits: VisitRow[]
+  signups: SignupRow[]
+  theme: Theme
+  segments: Segment[]
+  brandName: string
+  appUrl: string
+  timezone: string
+  notConfigured?: boolean
+}) {
+  const t = theme
+  const domain = brandDomain(appUrl, brandName)
+
+  const now = Date.now()
+  const within = (ms: number) => visits.filter(v => now - new Date(v.created_at).getTime() <= ms).length
+  // "Today" = calendar day in the configured timezone (resets at local
+  // midnight), not a rolling 24h window. Compare each visit's local
+  // calendar date to today's — DST-proof, no offset math. last7/last30
+  // stay rolling (labels say "last N days").
+  const localDate = (d: string | number) =>
+    new Date(d).toLocaleDateString('en-CA', { timeZone: timezone })
+  const todayLocal = localDate(now)
+  const today = visits.filter(v => localDate(v.created_at) === todayLocal).length
+  const last7 = within(7 * 24 * 3600_000)
+  const last30 = visits.length
+
+  const byRegion   = tally(visits, regionLabel)
+  const byReferrer = tally(visits, v => refHost(v.referrer))
+  const byDevice   = tally(visits, v => v.device)
+  const byCampaign = tally(visits.filter(v => v.utm_source), v => v.utm_source)
+
+  // Inbound signups by configured segment (the generalization of the old
+  // "Signups by sport" card). One bar card per segment, counting each
+  // present `${namespace}${value}` tag on homepage signups (a signup may
+  // carry more than one). Populated when outreach links carry e.g.
+  // ?sport=cricket (or a sport-named UTM). Empty array → the whole row of
+  // segment cards is suppressed.
+  const segmentCards = segments.map(seg => {
+    const m = new Map<string, number>()
+    for (const s of signups) {
+      for (const v of valuesFromTags([seg], s.tags)) m.set(v.label, (m.get(v.label) || 0) + 1)
+    }
+    const rows = [...m.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count)
+    return { seg, rows, total: rows.reduce((s, r) => s + r.count, 0) }
+  })
+
+  // Conversion: visits vs signups, matched by normalized source + region.
+  const convBySource = buildConversion(visits, signups, v => refHost(v.referrer), s => refHost(s.referrer))
+  const convByRegion = buildConversion(visits, signups, regionLabel, regionLabel)
+  const overallRate  = last30 > 0 ? signups.length / last30 : null
+
+  return (
+    <>
+      <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', color: t.text, margin: '0 0 6px 0' }}>
+        Traffic
+      </h1>
+      <p style={{ fontSize: 14, color: t.mutedText, margin: '0 0 28px 0' }}>
+        Every visit to {domain} — last 30 days, bots excluded.
+        {' '}For full charts (over-time, real-time) see the Vercel Analytics tab.
+      </p>
+
+      {notConfigured ? (
+        <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '28px 22px', color: t.mutedText, fontSize: 14, lineHeight: 1.6 }}>
+          Mailer Supabase env not configured on this deployment.
+        </div>
+      ) : last30 === 0 ? (
+        <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '28px 22px', color: t.mutedText, fontSize: 14, lineHeight: 1.6 }}>
+          No visits logged yet. Visits are logged from the public homepage (not the admin) — open the site, then refresh: region / referrer / device breakdowns appear here within a moment.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 28 }}>
+            <Stat t={t} label="Visits today"   value={today} tone="accent" />
+            <Stat t={t} label="Last 7 days"    value={last7} />
+            <Stat t={t} label="Last 30 days"   value={last30} tone="muted" />
+            <Stat t={t} label="Signup rate (30d)" display={overallRate == null ? '—' : `${(overallRate * 100).toFixed(1)}%`} value={signups.length} tone="accent" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14, marginBottom: 14 }}>
+            <BarCard t={t} title="By region (state · country)" rows={byRegion} total={last30} />
+            <BarCard t={t} title="Where they came from" rows={byReferrer} total={last30} />
+            <BarCard t={t} title="Device" rows={byDevice} total={last30} />
+            <BarCard t={t} title="Campaign (utm_source)" rows={byCampaign} total={byCampaign.reduce((s, r) => s + r.count, 0)} emptyHint="Tag your shared links with ?utm_source=… to see campaigns here." />
+            {segmentCards.map(c => (
+              <BarCard
+                key={c.seg.key}
+                t={t}
+                title={`Signups by ${c.seg.label.toLowerCase()}`}
+                rows={c.rows}
+                total={c.total}
+                emptyHint={`Tag outreach links with ?${c.seg.key}=… (or a ${c.seg.key}-named utm_source) so ${c.seg.label.toLowerCase()}-driven signups show up here.`}
+              />
+            ))}
+          </div>
+
+          <ConversionCard
+            t={t}
+            title="Conversion by source — visits vs signups"
+            rows={convBySource}
+            note="Which channels actually produce signups, not just clicks. Rates firm up as traffic builds."
+          />
+          <div style={{ height: 14 }} />
+          <ConversionCard t={t} title="Conversion by region" rows={convByRegion} />
+        </>
+      )}
+    </>
+  )
+}
+
+// ───────────────────────── themed presentational cards ─────────────────────────
+
+function Stat({ t, label, value, display, tone = 'normal' }: { t: Theme; label: string; value: number; display?: string; tone?: 'normal' | 'muted' | 'accent' }) {
+  const color = tone === 'accent' ? t.accent : tone === 'muted' ? t.mutedText : t.text
+  return (
+    <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: '16px 18px' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', color: t.mutedText, marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 800, color }}>{display ?? value.toLocaleString()}</div>
+      {display != null && <div style={{ fontSize: 12, color: t.faintText, marginTop: 2 }}>{value.toLocaleString()} signups</div>}
+    </div>
+  )
+}
+
+function BarCard({ t, title, rows, total, emptyHint }: {
+  t: Theme
+  title: string
+  rows: Array<{ label: string; count: number }>
+  total: number
+  emptyHint?: string
+}) {
+  const top = rows.slice(0, 8)
+  const max = top.length ? top[0].count : 1
+  return (
+    <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '18px 20px' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: t.mutedText, marginBottom: 14 }}>
+        {title}
+      </div>
+      {top.length === 0 ? (
+        <div style={{ fontSize: 13, color: t.faintText, lineHeight: 1.5 }}>{emptyHint || 'No data yet.'}</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {top.map(r => {
+            const pct = total > 0 ? Math.round((r.count / total) * 100) : 0
+            return (
+              <div key={r.label}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 3 }}>
+                  <span style={{ color: t.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{r.label}</span>
+                  <span style={{ color: t.mutedText }}>{r.count} · {pct}%</span>
+                </div>
+                <div style={{ height: 6, background: t.headerBg, borderRadius: 9999, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${Math.max(3, Math.round((r.count / max) * 100))}%`, background: t.accent, borderRadius: 9999 }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConversionCard({ t, title, rows, note }: { t: Theme; title: string; rows: ConvRow[]; note?: string }) {
+  const top = rows.slice(0, 10)
+  return (
+    <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '18px 20px' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: t.mutedText, marginBottom: note ? 6 : 14 }}>
+        {title}
+      </div>
+      {note && <div style={{ fontSize: 12, color: t.faintText, marginBottom: 14, lineHeight: 1.5 }}>{note}</div>}
+      {top.length === 0 ? (
+        <div style={{ fontSize: 13, color: t.faintText }}>No data yet.</div>
+      ) : (
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <table style={{ width: '100%', minWidth: 360, borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: t.mutedText, fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              <th style={{ padding: '4px 0' }}>Source</th>
+              <th style={{ padding: '4px 8px', textAlign: 'right' }}>Visits</th>
+              <th style={{ padding: '4px 8px', textAlign: 'right' }}>Signups</th>
+              <th style={{ padding: '4px 0', textAlign: 'right' }}>Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map(r => {
+              // Highlight a strong converter (≥5% with a meaningful base).
+              const strong = r.rate != null && r.rate >= 0.05 && r.visits >= 5
+              return (
+                <tr key={r.label} style={{ borderTop: `1px solid ${t.borderSoft}` }}>
+                  <td style={{ padding: '7px 0', color: t.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{r.label}</td>
+                  <td style={{ padding: '7px 8px', textAlign: 'right', color: t.mutedText }}>{r.visits.toLocaleString()}</td>
+                  <td style={{ padding: '7px 8px', textAlign: 'right', color: t.mutedText }}>{r.signups.toLocaleString()}</td>
+                  <td style={{ padding: '7px 0', textAlign: 'right', fontWeight: 700, color: r.rate == null ? t.faintText : strong ? '#16A34A' : t.text }}>
+                    {r.rate == null ? '—' : `${(r.rate * 100).toFixed(1)}%`}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        </div>
+      )}
+    </div>
+  )
+}
