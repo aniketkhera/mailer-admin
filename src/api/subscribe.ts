@@ -45,6 +45,15 @@ export function createSubscribeRoute(cfg: MailerConfig) {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
     }
 
+    // Honeypot: a bot that fills the hidden field is silently dropped — we
+    // still return success so the trap isn't detectable.
+    if (cfg.honeypotField) {
+      const trap = body[cfg.honeypotField]
+      if (typeof trap === 'string' && trap.trim()) {
+        return NextResponse.json({ success: true })
+      }
+    }
+
     // Contact: a dedicated email field, else the generic `contact` field
     // (which — when contactMode is email-or-phone — may hold a phone).
     const rawContact = str(body.email) || str(body.contact)
@@ -86,6 +95,11 @@ export function createSubscribeRoute(cfg: MailerConfig) {
     // `segment`, else inferred from a segment-named UTM. Accepts BOTH the
     // public form's field and the admin's `segment` field.
     const segTags = resolveSegmentTags(cfg.segments || [], body, { utmSource: utm_source, utmCampaign: utm_campaign })
+    // Extra configured form fields captured as tags (e.g. zipCode -> zip:08540).
+    const extraTags = (cfg.signupTags || [])
+      .map(t => { const v = str(body[t.field]); return v ? `${t.prefix}${v.slice(0, 64)}` : null })
+      .filter((x): x is string => !!x)
+    const tags = [...segTags, ...extraTags]
 
     // Geo — Vercel sets these at the edge; null in local dev.
     const country = req.headers.get('x-vercel-ip-country') || null
@@ -120,7 +134,7 @@ export function createSubscribeRoute(cfg: MailerConfig) {
             first_name: first_name || null,
             last_name: last_name || null,
             source,
-            tags: segTags,
+            tags,
             referrer,
             utm_source,
             utm_medium,

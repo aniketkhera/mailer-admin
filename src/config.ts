@@ -54,6 +54,12 @@ export type MailerConfig = {
   leads?: { enabled: boolean; table: string; interestOptions: LeadOption[] }
   /** 'email-or-phone' lets the public form accept a phone in the contact field. Default 'email'. */
   contactMode?: 'email' | 'email-or-phone'
+  /** Hidden honeypot field name; a non-empty value on public signup is treated
+   *  as a bot and silently dropped (still returns success). e.g. 'company'. */
+  honeypotField?: string
+  /** Extra public-signup form fields to record as subscriber tags, e.g.
+   *  [{ field: 'zipCode', prefix: 'zip:' }] → tags ['zip:08540']. */
+  signupTags?: { field: string; prefix: string }[]
   /** Send the welcome email on new signup. Default: true. */
   welcomeEmails?: boolean
   /** IANA tz for the Traffic "today" bucket. Default America/New_York. */
