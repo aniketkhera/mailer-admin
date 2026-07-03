@@ -98,7 +98,10 @@ export function markdownToEmailHtml(md: string, opts: { linkColor?: string } = {
 
     if ((m = trimmed.match(/^!\[([^\]]*)\]\((https?:[^)\s]+)\)$/))) {
       const alt = escapeHtml(m[1])
-      const src = m[2]
+      // Escape the src: the raw line is NOT pre-escaped here (unlike
+      // renderInline), so an embedded quote would otherwise break out of the
+      // src="" attribute and inject arbitrary attributes (e.g. onerror).
+      const src = escapeHtml(m[2])
       out.push(`<div style="${STYLES.imgWrap}"><img src="${src}" alt="${alt}" style="${STYLES.img}" /></div>`)
       i++; continue
     }

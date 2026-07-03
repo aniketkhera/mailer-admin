@@ -10,11 +10,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { createSupabase } from '../lib/supabase'
+import { rateLimit, clientIp } from '../lib/rate-limit'
 
 export function createResubscribeRoute(cfg: MailerConfig) {
   const supa = createSupabase(cfg)
 
   async function POST(req: NextRequest) {
+    if (!rateLimit(`resubscribe:${clientIp(req)}`, 10, 60_000)) {
+      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
+    }
     let body: { token?: string }
     try {
       body = await req.json()

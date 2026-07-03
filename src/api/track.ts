@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { NOTRACK_COOKIE } from '../config'
 import { createSupabase } from '../lib/supabase'
+import { rateLimit, clientIp } from '../lib/rate-limit'
 
 // Lightweight bot detection from the user-agent. Not exhaustive — just
 // catches the obvious crawlers/monitors so they can be filtered out of
@@ -39,6 +40,10 @@ export function createTrackRoute(cfg: MailerConfig) {
       // operator's own visits out of the public-traffic stats.
       if (req.cookies.get(NOTRACK_COOKIE)?.value === '1') return new NextResponse(null, { status: 204 })
       if (!supa.configured()) return new NextResponse(null, { status: 204 })
+      // Generous per-IP cap: a normal visitor never hits it, but it stops a
+      // script spraying visit rows. Over-limit is silently dropped (still 204)
+      // so the beacon never reveals the throttle.
+      if (!rateLimit(`track:${clientIp(req)}`, 120, 60_000)) return new NextResponse(null, { status: 204 })
 
       let body: Record<string, string | null> = {}
       try { body = (await req.json()) as Record<string, string | null> } catch { /* empty beacon is fine */ }

@@ -62,6 +62,9 @@ export function resolveSegmentTags(
       const tok = firstToken(cand)
       if (tok && s.values.includes(tok)) { value = tok; break }
     }
+    // No explicit/UTM value → fall back to the segment's configured default
+    // (e.g. a squash-only site tags every organic signup sport:squash).
+    if (!value && s.default && s.values.includes(s.default)) value = s.default
     if (value) out.push(`${s.namespace}${value}`)
   }
   return out

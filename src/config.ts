@@ -25,6 +25,10 @@ export type Segment = {
   namespace: string  // 'sport:'  (stored in subscribers.tags[] as `${namespace}${value}`)
   label: string      // 'Sport'
   values: string[]   // ['cricket','squash','badminton',...]
+  /** Fallback value tagged on a PUBLIC signup that supplies no segment value
+   *  and matches no segment-named UTM (e.g. a squash-only launch site defaults
+   *  every organic signup to sport:squash). Must be one of `values`. */
+  default?: string
 }
 
 export type LeadOption = { value: string; label: string }
@@ -101,13 +105,25 @@ export function defineConfig(c: MailerConfig): MailerConfig {
   return c
 }
 
-/** Shared "Mailers" Supabase creds — prefer the namespaced MAILER_* names
- *  (orangish-io, which also has a member-app DB) then the generic names
- *  (every other site). Called lazily by each site's config. */
+/** Shared "Mailers" Supabase creds. Resolved as an ATOMIC PAIR so a partial
+ *  env can never mix a URL from one project with a service-role key from
+ *  another: if the namespaced MAILER_SUPABASE_URL is present (orangish-io,
+ *  which ALSO has a separate member-app DB under the generic names) we take
+ *  the MAILER_* url+key together; otherwise we fall back to the generic
+ *  pair together (every other site, which has a single DB). This prevents
+ *  the dangerous crossover where a dropped MAILER_* var silently pointed
+ *  mailer traffic at the member-app credentials. Called lazily by each
+ *  site's config. */
 export function resolveSupabaseEnv(): SupabaseEnv {
+  if (process.env.MAILER_SUPABASE_URL) {
+    return {
+      url: process.env.MAILER_SUPABASE_URL,
+      key: process.env.MAILER_SUPABASE_SERVICE_ROLE_KEY,
+    }
+  }
   return {
-    url: process.env.MAILER_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
-    key: process.env.MAILER_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    key: process.env.SUPABASE_SERVICE_ROLE_KEY,
   }
 }
 

@@ -42,7 +42,14 @@ export function createUploadImageRoute(cfg: MailerConfig) {
 
     try {
       const buf = await file.arrayBuffer()
-      const url = await supa.uploadImage(file.name, buf, file.type)
+      // Don't trust the client-declared Content-Type — sniff the magic bytes
+      // and store using the SNIFFED type. Rejects a non-image whose name/MIME
+      // was spoofed to .png, and stops mislabeled bytes being served publicly.
+      const sniffed = sniffImageType(buf)
+      if (!sniffed) {
+        return NextResponse.json({ error: 'File is not a valid PNG / JPG / GIF / WebP image.' }, { status: 415 })
+      }
+      const url = await supa.uploadImage(file.name, buf, sniffed)
       return NextResponse.json({ url })
     } catch (e) {
       console.error('[mailer-admin upload-image]', e instanceof Error ? e.message : e)
@@ -51,4 +58,24 @@ export function createUploadImageRoute(cfg: MailerConfig) {
   }
 
   return { POST }
+}
+
+/** Sniff an image type from the leading magic bytes. Returns the canonical
+ *  content-type or null if the bytes are not one of the allowed image formats.
+ *  (Deliberately does NOT accept SVG — it is an active document.) */
+function sniffImageType(buf: ArrayBuffer): string | null {
+  const b = new Uint8Array(buf)
+  if (b.length < 12) return null
+  // PNG  89 50 4E 47 0D 0A 1A 0A
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png'
+  // JPEG FF D8 FF
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
+  // GIF  47 49 46 38 ("GIF8")
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return 'image/gif'
+  // WEBP "RIFF"...."WEBP"
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  ) return 'image/webp'
+  return null
 }

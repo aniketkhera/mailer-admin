@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { createSupabase } from '../lib/supabase'
+import { rateLimit, clientIp } from '../lib/rate-limit'
 
 async function extractToken(req: NextRequest): Promise<string | null> {
   // 1) query string — the header URL carries ?token=...
@@ -50,6 +51,13 @@ export function createUnsubscribeRoute(cfg: MailerConfig) {
   const supa = createSupabase(cfg)
 
   async function POST(req: NextRequest) {
+    // Deliberately GENEROUS: this is the RFC-8058 one-click target and mail
+    // providers (Gmail/Apple) POST it on the user's behalf, sometimes bursting
+    // from a few proxy IPs — throttling a real unsubscribe would be a CAN-SPAM
+    // failure. So this is only a high DoS backstop, not a tight limit.
+    if (!rateLimit(`unsubscribe:${clientIp(req)}`, 60, 60_000)) {
+      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
+    }
     const token = await extractToken(req)
     if (!token || token.length < 8) {
       return NextResponse.json({ error: 'Token required.' }, { status: 400 })

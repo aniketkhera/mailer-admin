@@ -17,6 +17,11 @@ export function createSubscriberRoute(cfg: MailerConfig) {
     if (!session) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
 
     const { id } = await ctx.params
+    // Validate the id is a UUID before any DB call — a malformed id can never
+    // match a real row, and this keeps attacker-controlled input off the query.
+    if (!UUID_RE.test(id)) {
+      return NextResponse.json({ error: 'Invalid subscriber id.' }, { status: 400 })
+    }
     let body: { action?: string; email?: string; first_name?: string; last_name?: string }
     try { body = await req.json() } catch {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -28,7 +33,9 @@ export function createSubscriberRoute(cfg: MailerConfig) {
         ? { unsubscribed_at: new Date().toISOString() }
         : { unsubscribed_at: null }
       try {
-        await supa.updateRows('subscribers', { id: `eq.${id}` }, patch)
+        // property-scoped: a foreign-property id becomes a zero-row no-op
+        // instead of a cross-tenant write (the service-role key bypasses RLS).
+        await supa.updateRows('subscribers', { id: `eq.${id}`, property: `eq.${cfg.property}` }, patch)
         return NextResponse.json({ success: true })
       } catch (e) {
         console.error('[mailer-admin subscriber PATCH action]', e instanceof Error ? e.message : e)
@@ -63,7 +70,7 @@ export function createSubscriberRoute(cfg: MailerConfig) {
     }
 
     try {
-      await supa.updateRows('subscribers', { id: `eq.${id}` }, patch)
+      await supa.updateRows('subscribers', { id: `eq.${id}`, property: `eq.${cfg.property}` }, patch)
       return NextResponse.json({ success: true })
     } catch (e) {
       console.error('[mailer-admin subscriber PATCH edit]', e instanceof Error ? e.message : e)
@@ -73,3 +80,5 @@ export function createSubscriberRoute(cfg: MailerConfig) {
 
   return { PATCH }
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

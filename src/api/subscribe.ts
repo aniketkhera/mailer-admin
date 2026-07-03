@@ -26,6 +26,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { createSupabase } from '../lib/supabase'
 import { resolveSegmentTags } from '../lib/segments'
+import { rateLimit, clientIp } from '../lib/rate-limit'
 import {
   sendOne,
   unsubscribeUrl,
@@ -40,6 +41,13 @@ export function createSubscribeRoute(cfg: MailerConfig) {
   const allowPhone = cfg.contactMode === 'email-or-phone'
 
   async function POST(req: NextRequest) {
+    // Per-IP throttle: the write path persists a row AND (for new emails) can
+    // fire a welcome + owner-notify email, so cap a single IP to keep it from
+    // flooding the list / exhausting the Resend quota.
+    if (!rateLimit(`subscribe:${clientIp(req)}`, 5, 60_000)) {
+      return NextResponse.json({ error: 'Too many requests. Please try again shortly.' }, { status: 429 })
+    }
+
     let body: Record<string, string | null> = {}
     try { body = (await req.json()) as Record<string, string | null> } catch {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -107,6 +115,10 @@ export function createSubscribeRoute(cfg: MailerConfig) {
     const city = hdr(req, 'x-vercel-ip-city')
 
     // ── 1. Persist to subscribers ────────────────────────────────────
+    // Tracks whether THIS request created a brand-new subscriber row; gates
+    // the owner-notify below so a repeat/resubscribe submit can't fan out 1:1
+    // into notify emails (inbox-flood guard).
+    let wasNew = false
     if (supa.configured()) {
       try {
         // Dedupe on whichever contact we have.
@@ -143,6 +155,7 @@ export function createSubscribeRoute(cfg: MailerConfig) {
             region,
             city,
           })
+          wasNew = true
           // Brand-new email subscriber → send the admin-configured welcome
           // email (if enabled). Phone-only contacts get no email.
           if (email) {
@@ -154,8 +167,8 @@ export function createSubscribeRoute(cfg: MailerConfig) {
       }
     }
 
-    // ── 2. Notify the property owner ─────────────────────────────────
-    if (cfg.notifyEmail) {
+    // ── 2. Notify the property owner (ONLY for genuinely new signups) ──
+    if (cfg.notifyEmail && wasNew) {
       try {
         await sendOne(cfg, {
           to: cfg.notifyEmail,
