@@ -121,34 +121,34 @@ function brandDomain(appUrl: string, brandName: string): string {
 // browser sends with every /api/track beacon, so the operator's own
 // browsing is excluded from the stats. Admin login auto-sets it; this is
 // for other devices (phone, incognito) or to turn it back off.
-// ── Hourly (hour-of-day) stacked histogram ─────────────────────────────
+// ── Windowed stacked time-series histogram ─────────────────────────────
 const HOURLY_COLORS = ['#e0845a', '#5C8A54', '#4A78B5', '#C9A227', '#8A5CB5', '#B3A79E']
-type HourlyData = { series: { label: string; color: string; counts: number[] }[]; hourTotals: number[]; max: number }
+type StackData = { series: { label: string; color: string; counts: number[] }[]; totals: number[]; max: number }
 
-// Bucket rows into 24 hour-of-day stacks split by keyFn (top-K + "Other").
-function buildHourly(rows: VisitRow[], keyFn: (v: VisitRow) => string, hourOf: (iso: string) => number, topK = 5): HourlyData {
+// Bucket rows into `bucketCount` stacks (hours of today, or calendar days over a
+// multi-day window) split by keyFn (top-K + "Other"). bucketOf maps a timestamp
+// to its bucket index, or -1 to drop it (outside the range).
+function buildStacks(rows: VisitRow[], keyFn: (v: VisitRow) => string, bucketOf: (iso: string) => number, bucketCount: number, topK = 5): StackData {
   const totalByKey = new Map<string, number>()
   for (const v of rows) { const k = keyFn(v); totalByKey.set(k, (totalByKey.get(k) || 0) + 1) }
   const top = [...totalByKey.entries()].sort((a, b) => b[1] - a[1]).slice(0, topK).map(([k]) => k)
   const labels = [...top, ...(totalByKey.size > top.length ? ['Other'] : [])]
   const idxOf = new Map<string, number>(top.map((l, i) => [l, i]))
   const otherIdx = labels.length - 1
-  const counts: number[][] = labels.map(() => new Array(24).fill(0))
-  const hourTotals = new Array(24).fill(0)
+  const counts: number[][] = labels.map(() => new Array(bucketCount).fill(0))
+  const totals = new Array(bucketCount).fill(0)
   for (const v of rows) {
-    const h = hourOf(v.created_at)
+    const b = bucketOf(v.created_at)
+    if (b < 0 || b >= bucketCount) continue
     const li = idxOf.has(keyFn(v)) ? idxOf.get(keyFn(v))! : otherIdx
-    counts[li][h]++; hourTotals[h]++
+    counts[li][b]++; totals[b]++
   }
   const series = labels.map((label, i) => ({
     label,
     color: label === 'Other' ? HOURLY_COLORS[HOURLY_COLORS.length - 1] : HOURLY_COLORS[Math.min(i, HOURLY_COLORS.length - 2)],
     counts: counts[i],
   }))
-  return { series, hourTotals, max: Math.max(1, ...hourTotals) }
-}
-function hourAxisLabel(h: number): string {
-  return h === 0 ? '12a' : h === 6 ? '6a' : h === 12 ? '12p' : h === 18 ? '6p' : h === 23 ? '11p' : ''
+  return { series, totals, max: Math.max(1, ...totals) }
 }
 
 // Live current-time readout (ticks each second) in the site's timezone —
@@ -282,13 +282,39 @@ export default function VisitsClient({
   const wVisits = visits.filter(v => inWin(v.created_at))
   const wSignups = signups.filter(s => inWin(s.subscribed_at))
 
-  // Hour-of-day histograms for the selected window, stacked by source + region.
-  // Bucketed by US East Coast time explicitly (not the visitor's/server's zone)
-  // so the bars always mean ET hours regardless of who's viewing or where it runs.
-  const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hour12: false, hourCycle: 'h23' })
-  const hourOf = (iso: string) => parseInt(hourFmt.format(new Date(iso)), 10) % 24
-  const bySourceHourly = buildHourly(wVisits, v => srcOf(v.referrer), hourOf)
-  const byLocationHourly = buildHourly(wVisits, regionLabel, hourOf)
+  // Windowed time-series histogram. Today → 24 hourly buckets; 7d/30d → one
+  // bucket per calendar day (so "last 30 days" shows 30 daily bars, not a
+  // 24-hour collapse). All in US East Coast time (explicit, not the viewer's or
+  // server's zone) so the axis always means ET.
+  const etHourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hour12: false, hourCycle: 'h23' })
+  const etHourOf = (iso: string) => parseInt(etHourFmt.format(new Date(iso)), 10) % 24
+  const etDateOf = (iso: string | number) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  let bucketCount: number
+  let bucketOf: (iso: string) => number
+  let axisLabels: string[]
+  let tipLabels: string[]
+  let grain: string
+  if (win === 'today') {
+    bucketCount = 24
+    bucketOf = etHourOf
+    const hr = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`
+    tipLabels = Array.from({ length: 24 }, (_, h) => hr(h))
+    axisLabels = Array.from({ length: 24 }, (_, h) => (h === 0 ? '12a' : h === 6 ? '6a' : h === 12 ? '12p' : h === 18 ? '6p' : h === 23 ? '11p' : ''))
+    grain = 'by hour (ET)'
+  } else {
+    const days = win === '7d' ? 7 : 30
+    const dayKeys: string[] = []
+    for (let i = days - 1; i >= 0; i--) dayKeys.push(etDateOf(now - i * 86400_000))
+    const idxByDay = new Map(dayKeys.map((k, i) => [k, i]))
+    bucketCount = days
+    bucketOf = (iso) => { const k = etDateOf(iso); return idxByDay.has(k) ? idxByDay.get(k)! : -1 }
+    const mmdd = (k: string) => { const p = k.split('-'); return `${parseInt(p[1], 10)}/${parseInt(p[2], 10)}` }
+    tipLabels = dayKeys.map(mmdd)
+    axisLabels = dayKeys.map((k, i) => (days === 7 || i === 0 || i === days - 1 || i % 6 === 0 ? mmdd(k) : ''))
+    grain = `by day · last ${days} days (ET)`
+  }
+  const bySourceStacks = buildStacks(wVisits, v => srcOf(v.referrer), bucketOf, bucketCount)
+  const byLocationStacks = buildStacks(wVisits, regionLabel, bucketOf, bucketCount)
 
   const byRegion   = tally(wVisits, regionLabel)
   const byReferrer = tally(wVisits, v => srcOf(v.referrer))
@@ -370,8 +396,8 @@ export default function VisitsClient({
           <WindowTabs t={t} win={win} setWin={setWin} />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, marginBottom: 14 }}>
-            <StackedHourly t={t} title="By hour of day (ET) · source" data={bySourceHourly} />
-            <StackedHourly t={t} title="By hour of day (ET) · location" data={byLocationHourly} />
+            <StackedBars t={t} title={`Source · ${grain}`} data={bySourceStacks} axisLabels={axisLabels} tipLabels={tipLabels} />
+            <StackedBars t={t} title={`Location · ${grain}`} data={byLocationStacks} axisLabels={axisLabels} tipLabels={tipLabels} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14, marginBottom: 14 }}>
@@ -445,9 +471,10 @@ function Stat({ t, label, value, display, sub, tone = 'normal' }: { t: Theme; la
   )
 }
 
-function StackedHourly({ t, title, data }: { t: Theme; title: string; data: HourlyData }) {
+function StackedBars({ t, title, data, axisLabels, tipLabels }: { t: Theme; title: string; data: StackData; axisLabels: string[]; tipLabels: string[] }) {
   const H = 130
-  const empty = data.hourTotals.every(n => n === 0)
+  const n = data.totals.length
+  const empty = data.totals.every(x => x === 0)
   return (
     <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '18px 20px' }}>
       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: t.mutedText, marginBottom: 14 }}>
@@ -466,21 +493,21 @@ function StackedHourly({ t, title, data }: { t: Theme; title: string; data: Hour
             ))}
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: H }}>
-            {Array.from({ length: 24 }, (_, h) => {
-              const hct = data.hourTotals[h]
-              const barH = hct ? Math.max(2, Math.round((hct / data.max) * H)) : 0
+            {Array.from({ length: n }, (_, b) => {
+              const ct = data.totals[b]
+              const barH = ct ? Math.max(2, Math.round((ct / data.max) * H)) : 0
               return (
-                <div key={h} title={`${hourAxisLabel(h) || `${h}:00`} · ${hct} views`} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                <div key={b} title={`${tipLabels[b]} · ${ct} views`} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
                   <div style={{ height: barH, display: 'flex', flexDirection: 'column', borderRadius: '3px 3px 0 0', overflow: 'hidden' }}>
-                    {data.series.map(s => (s.counts[h] ? <div key={s.label} style={{ height: `${(s.counts[h] / hct) * 100}%`, background: s.color }} /> : null))}
+                    {data.series.map(s => (s.counts[b] ? <div key={s.label} style={{ height: `${(s.counts[b] / ct) * 100}%`, background: s.color }} /> : null))}
                   </div>
                 </div>
               )
             })}
           </div>
           <div style={{ display: 'flex', gap: 2, marginTop: 5 }}>
-            {Array.from({ length: 24 }, (_, h) => (
-              <div key={h} style={{ flex: 1, textAlign: 'center', fontSize: 9, color: t.faintText }}>{hourAxisLabel(h)}</div>
+            {axisLabels.map((lbl, b) => (
+              <div key={b} style={{ flex: 1, textAlign: 'center', fontSize: 9, color: t.faintText, whiteSpace: 'nowrap' }}>{lbl}</div>
             ))}
           </div>
         </>
