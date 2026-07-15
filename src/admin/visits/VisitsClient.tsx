@@ -151,6 +151,25 @@ function hourAxisLabel(h: number): string {
   return h === 0 ? '12a' : h === 6 ? '6a' : h === 12 ? '12p' : h === 18 ? '6p' : h === 23 ? '11p' : ''
 }
 
+// Live current-time readout (ticks each second) in the site's timezone —
+// pinned to the report header so "today"/"last seen" always have a reference.
+// Its own state/interval so the parent (and the charts) don't re-render each
+// second. Renders null until mounted to avoid an SSR/client hydration mismatch.
+function LiveClock({ t, timezone }: { t: Theme; timezone: string }) {
+  const [now, setNow] = useState<Date | null>(null)
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  if (!now) return null
+  const s = now.toLocaleString('en-US', {
+    timeZone: timezone, weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZoneName: 'short',
+  })
+  return <span style={{ fontSize: 12, color: t.faintText, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{s}</span>
+}
+
 function NotrackToggle({ t }: { t: Theme }) {
   const [excluded, setExcluded] = useState<boolean | null>(null)
   useEffect(() => {
@@ -291,9 +310,12 @@ export default function VisitsClient({
 
   return (
     <>
-      <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', color: t.text, margin: '0 0 6px 0' }}>
-        Traffic
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', margin: '0 0 6px 0' }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', color: t.text, margin: 0 }}>
+          Traffic
+        </h1>
+        <LiveClock t={t} timezone={timezone} />
+      </div>
       <p style={{ fontSize: 14, color: t.mutedText, margin: '0 0 16px 0' }}>
         Page views to {domain} — last 30 days, bots excluded; unique visitors shown where tracking coverage allows.
         {' '}For full charts (over-time, real-time) see the Vercel Analytics tab.
