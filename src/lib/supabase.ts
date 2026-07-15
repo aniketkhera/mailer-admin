@@ -14,6 +14,7 @@ export type RestOptions = {
   filters?: Record<string, string>
   order?: string
   limit?: number
+  offset?: number
   prefer?: string
 }
 
@@ -46,6 +47,7 @@ export function createSupabase(cfg: MailerConfig) {
     if (opts.filters) for (const [k, v] of Object.entries(opts.filters)) u.searchParams.set(k, v)
     if (opts.order) u.searchParams.set('order', opts.order)
     if (opts.limit != null) u.searchParams.set('limit', String(opts.limit))
+    if (opts.offset != null) u.searchParams.set('offset', String(opts.offset))
     return u.toString()
   }
 
@@ -69,6 +71,27 @@ export function createSupabase(cfg: MailerConfig) {
   async function selectOne<T = Record<string, unknown>>(table: string, opts: RestOptions = {}): Promise<T | null> {
     const rows = await selectRows<T>(table, { ...opts, limit: 1 })
     return rows[0] ?? null
+  }
+
+  /**
+   * Paginate past PostgREST's per-request row cap (Supabase defaults to 1000).
+   * Loops offset/limit pages until a short page or `maxRows` is hit, so callers
+   * that aggregate over a window get the WHOLE window — not a truncated,
+   * newest-N sample. Returns { rows, capped } so the caller can note when the
+   * safety cap was reached. `order` should be set for stable paging.
+   */
+  async function selectAll<T = Record<string, unknown>>(
+    table: string,
+    opts: RestOptions = {},
+    { pageSize = 1000, maxRows = 100_000 }: { pageSize?: number; maxRows?: number } = {},
+  ): Promise<{ rows: T[]; capped: boolean }> {
+    const out: T[] = []
+    for (let offset = 0; offset < maxRows; offset += pageSize) {
+      const page = await selectRows<T>(table, { ...opts, limit: pageSize, offset })
+      out.push(...page)
+      if (page.length < pageSize) return { rows: out, capped: false }
+    }
+    return { rows: out, capped: true }
   }
 
   async function insertRow<T = Record<string, unknown>>(
@@ -118,5 +141,5 @@ export function createSupabase(cfg: MailerConfig) {
     return `${url}/storage/v1/object/public/${BUCKET}/${objectKey}`
   }
 
-  return { property: cfg.property, configured, selectRows, selectOne, insertRow, insertRows, updateRows, uploadImage }
+  return { property: cfg.property, configured, selectRows, selectOne, selectAll, insertRow, insertRows, updateRows, uploadImage }
 }

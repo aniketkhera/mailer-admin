@@ -26,6 +26,7 @@ export type VisitRow = {
   region: string | null
   country: string | null
   device: string | null
+  visitor_hash: string | null
   is_bot: boolean
   created_at: string
 }
@@ -176,9 +177,27 @@ export default function VisitsClient({
   const localDate = (d: string | number) =>
     new Date(d).toLocaleDateString('en-CA', { timeZone: timezone })
   const todayLocal = localDate(now)
-  const today = visits.filter(v => localDate(v.created_at) === todayLocal).length
+  const inToday = (v: VisitRow) => localDate(v.created_at) === todayLocal
+  const inLast = (ms: number) => (v: VisitRow) => now - new Date(v.created_at).getTime() <= ms
+  const today = visits.filter(inToday).length
   const last7 = within(7 * 24 * 3600_000)
   const last30 = visits.length
+
+  // Unique visitors = distinct visitor_hash. Only meaningful where most rows
+  // in the window are hashed — during the tracker rollout, older rows have no
+  // hash, so we gate on ≥50% coverage and otherwise return null ("—") rather
+  // than a number that undercounts. Returns "≈N unique" copy for the subline.
+  const uniqueSub = (pred: (v: VisitRow) => boolean): string | undefined => {
+    const rows = visits.filter(pred)
+    if (!rows.length) return undefined
+    const hashed = rows.filter(v => v.visitor_hash)
+    if (hashed.length / rows.length < 0.5) return undefined
+    const n = new Set(hashed.map(v => v.visitor_hash as string)).size
+    return `≈${n.toLocaleString()} unique`
+  }
+  const todayUniqueSub = uniqueSub(inToday)
+  const last7UniqueSub = uniqueSub(inLast(7 * 24 * 3600_000))
+  const last30UniqueSub = uniqueSub(() => true)
 
   const byRegion   = tally(visits, regionLabel)
   const byReferrer = tally(visits, v => refHost(v.referrer))
@@ -213,7 +232,7 @@ export default function VisitsClient({
         Traffic
       </h1>
       <p style={{ fontSize: 14, color: t.mutedText, margin: '0 0 16px 0' }}>
-        Every visit to {domain} — last 30 days, bots excluded.
+        Page views to {domain} — last 30 days, bots excluded; unique visitors shown where tracking coverage allows.
         {' '}For full charts (over-time, real-time) see the Vercel Analytics tab.
       </p>
       <div><NotrackToggle t={t} /></div>
@@ -229,9 +248,9 @@ export default function VisitsClient({
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 28 }}>
-            <Stat t={t} label="Visits today"   value={today} tone="accent" />
-            <Stat t={t} label="Last 7 days"    value={last7} />
-            <Stat t={t} label="Last 30 days"   value={last30} tone="muted" />
+            <Stat t={t} label="Visits today"   value={today} tone="accent" sub={todayUniqueSub} />
+            <Stat t={t} label="Last 7 days"    value={last7} sub={last7UniqueSub} />
+            <Stat t={t} label="Last 30 days"   value={last30} tone="muted" sub={last30UniqueSub} />
             <Stat t={t} label="Signup rate (30d)" display={overallRate == null ? '—' : `${(overallRate * 100).toFixed(1)}%`} value={signups.length} tone="accent" />
           </div>
 
@@ -268,7 +287,7 @@ export default function VisitsClient({
 
 // ───────────────────────── themed presentational cards ─────────────────────────
 
-function Stat({ t, label, value, display, tone = 'normal' }: { t: Theme; label: string; value: number; display?: string; tone?: 'normal' | 'muted' | 'accent' }) {
+function Stat({ t, label, value, display, sub, tone = 'normal' }: { t: Theme; label: string; value: number; display?: string; sub?: string; tone?: 'normal' | 'muted' | 'accent' }) {
   const color = tone === 'accent' ? t.accent : tone === 'muted' ? t.mutedText : t.text
   return (
     <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: '16px 18px' }}>
@@ -277,6 +296,7 @@ function Stat({ t, label, value, display, tone = 'normal' }: { t: Theme; label: 
       </div>
       <div style={{ fontSize: 28, fontWeight: 800, color }}>{display ?? value.toLocaleString()}</div>
       {display != null && <div style={{ fontSize: 12, color: t.faintText, marginTop: 2 }}>{value.toLocaleString()} signups</div>}
+      {sub && <div style={{ fontSize: 12, color: t.faintText, marginTop: 2 }}>{sub}</div>}
     </div>
   )
 }

@@ -23,18 +23,20 @@ export function createVisitsPage(cfg: MailerConfig) {
   const auth = createAuth(cfg)
 
   // Fetch last-30-day human visits and let the client aggregate in-memory.
-  // At a coming-soon page's volume this is a few thousand rows max — cheap.
+  // MUST paginate: PostgREST caps each response at 1000 rows, so a plain
+  // select silently truncates busy windows (every stat + breakdown then
+  // reads only the newest 1000). selectAll loops past the cap.
   // (PostgREST GROUP BY would need an RPC; not worth it at this scale.)
   async function loadVisits(): Promise<VisitRow[]> {
     if (!supa.configured()) return []
     try {
       const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
-      const rows = await supa.selectRows<VisitRow>('visits', {
-        select: 'path,referrer,utm_source,utm_campaign,region,country,device,is_bot,created_at',
+      const { rows, capped } = await supa.selectAll<VisitRow>('visits', {
+        select: 'path,referrer,utm_source,utm_campaign,region,country,device,visitor_hash,is_bot,created_at',
         filters: { property: `eq.${cfg.property}`, is_bot: 'eq.false', created_at: `gte.${since}` },
         order: 'created_at.desc',
-        limit: 10000,
       })
+      if (capped) console.warn('[mailer-admin visits] 30d visits hit the 100k pagination cap — totals are a floor.')
       // Exclude admin traffic that may have been logged before the guard
       // was added (only public-site visits count).
       return rows.filter(v => !v.path?.startsWith('/admin'))
@@ -53,11 +55,12 @@ export function createVisitsPage(cfg: MailerConfig) {
     if (!supa.configured()) return []
     try {
       const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
-      return await supa.selectRows<SignupRow>('subscribers', {
+      const { rows } = await supa.selectAll<SignupRow>('subscribers', {
         select: 'referrer,utm_source,region,country,tags,subscribed_at',
         filters: { property: `eq.${cfg.property}`, source: 'eq.homepage', subscribed_at: `gte.${since}` },
-        limit: 10000,
+        order: 'subscribed_at.desc',
       })
+      return rows
     } catch (e) {
       console.error('[mailer-admin visits] signups load failed:', e instanceof Error ? e.message : e)
       return []
