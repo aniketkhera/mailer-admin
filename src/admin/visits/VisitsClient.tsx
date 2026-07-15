@@ -199,10 +199,21 @@ export default function VisitsClient({
   const last7UniqueSub = uniqueSub(inLast(7 * 24 * 3600_000))
   const last30UniqueSub = uniqueSub(() => true)
 
-  const byRegion   = tally(visits, regionLabel)
-  const byReferrer = tally(visits, v => refHost(v.referrer))
-  const byDevice   = tally(visits, v => v.device)
-  const byCampaign = tally(visits.filter(v => v.utm_source), v => v.utm_source)
+  // Breakdown window: the cards below (region / source / device / campaign /
+  // conversion) are scoped to this window — not always 30d. The 30d rows are
+  // already loaded, so switching is instant and fully client-side.
+  const [win, setWin] = useState<'today' | '7d' | '30d'>('30d')
+  const inWin = (ts: string | number) =>
+    win === 'today' ? localDate(ts) === todayLocal
+    : win === '7d' ? now - new Date(ts).getTime() <= 7 * 24 * 3600_000
+    : true
+  const wVisits = visits.filter(v => inWin(v.created_at))
+  const wSignups = signups.filter(s => inWin(s.subscribed_at))
+
+  const byRegion   = tally(wVisits, regionLabel)
+  const byReferrer = tally(wVisits, v => refHost(v.referrer))
+  const byDevice   = tally(wVisits, v => v.device)
+  const byCampaign = tally(wVisits.filter(v => v.utm_source), v => v.utm_source)
 
   // Inbound signups by configured segment (the generalization of the old
   // "Signups by sport" card). One bar card per segment, counting each
@@ -212,7 +223,7 @@ export default function VisitsClient({
   // segment cards is suppressed.
   const segmentCards = segments.map(seg => {
     const m = new Map<string, number>()
-    for (const s of signups) {
+    for (const s of wSignups) {
       for (const v of valuesFromTags([seg], s.tags)) m.set(v.label, (m.get(v.label) || 0) + 1)
     }
     const rows = [...m.entries()]
@@ -221,9 +232,10 @@ export default function VisitsClient({
     return { seg, rows, total: rows.reduce((s, r) => s + r.count, 0) }
   })
 
-  // Conversion: visits vs signups, matched by normalized source + region.
-  const convBySource = buildConversion(visits, signups, v => refHost(v.referrer), s => refHost(s.referrer))
-  const convByRegion = buildConversion(visits, signups, regionLabel, regionLabel)
+  // Conversion: visits vs signups, matched by normalized source + region —
+  // scoped to the selected breakdown window.
+  const convBySource = buildConversion(wVisits, wSignups, v => refHost(v.referrer), s => refHost(s.referrer))
+  const convByRegion = buildConversion(wVisits, wSignups, regionLabel, regionLabel)
   const overallRate  = last30 > 0 ? signups.length / last30 : null
 
   return (
@@ -254,10 +266,12 @@ export default function VisitsClient({
             <Stat t={t} label="Signup rate (30d)" display={overallRate == null ? '—' : `${(overallRate * 100).toFixed(1)}%`} value={signups.length} tone="accent" />
           </div>
 
+          <WindowTabs t={t} win={win} setWin={setWin} />
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14, marginBottom: 14 }}>
-            <BarCard t={t} title="By region (state · country)" rows={byRegion} total={last30} />
-            <BarCard t={t} title="Where they came from" rows={byReferrer} total={last30} />
-            <BarCard t={t} title="Device" rows={byDevice} total={last30} />
+            <BarCard t={t} title="By region (state · country)" rows={byRegion} total={wVisits.length} />
+            <BarCard t={t} title="Where they came from" rows={byReferrer} total={wVisits.length} />
+            <BarCard t={t} title="Device" rows={byDevice} total={wVisits.length} />
             <BarCard t={t} title="Campaign (utm_source)" rows={byCampaign} total={byCampaign.reduce((s, r) => s + r.count, 0)} emptyHint="Tag your shared links with ?utm_source=… to see campaigns here." />
             {segmentCards.map(c => (
               <BarCard
@@ -286,6 +300,30 @@ export default function VisitsClient({
 }
 
 // ───────────────────────── themed presentational cards ─────────────────────────
+
+// Segmented control that re-scopes every breakdown card below to Today / 7d /
+// 30d. Client-side only — the rows are already loaded for 30d.
+function WindowTabs({ t, win, setWin }: { t: Theme; win: 'today' | '7d' | '30d'; setWin: (w: 'today' | '7d' | '30d') => void }) {
+  const opts: Array<['today' | '7d' | '30d', string]> = [['today', 'Today'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days']]
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '4px 0 16px' }}>
+      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: t.mutedText }}>Breakdown window</span>
+      <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+        {opts.map(([k, label]) => {
+          const active = win === k
+          return (
+            <button key={k} onClick={() => setWin(k)} style={{
+              fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '6px 13px', borderRadius: 999,
+              border: active ? 'none' : `1px solid ${t.border}`,
+              background: active ? t.accent : 'transparent',
+              color: active ? t.accentText : t.mutedText,
+            }}>{label}</button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function Stat({ t, label, value, display, sub, tone = 'normal' }: { t: Theme; label: string; value: number; display?: string; sub?: string; tone?: 'normal' | 'muted' | 'accent' }) {
   const color = tone === 'accent' ? t.accent : tone === 'muted' ? t.mutedText : t.text
