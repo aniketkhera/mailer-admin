@@ -32,24 +32,17 @@ function deviceFromUa(ua: string): 'mobile' | 'tablet' | 'desktop' {
   return 'desktop'
 }
 
-// Eastern-time calendar date (YYYY-MM-DD). The visitor hash is scoped to the
-// ET day so it (a) rotates daily — a person is unlinkable across days, which
-// keeps this privacy-preserving and GDPR-friendly, and (b) lines up with the
-// digest's "today (ET)" window so within-day dedup is exact.
-function etDate(d: Date): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(d)
-}
-
-// Salted daily hash of ip+ua so we can count UNIQUE visitors (dedup repeat
-// page loads) and spot floods — WITHOUT ever storing a raw IP. The salt is a
-// per-deploy secret; if unset the hash still works but is more guessable, so
-// set VISITOR_HASH_SALT to a random string in prod.
+// Salted hash of ip+ua — a cookieless, IP-free visitor id. It is STABLE across
+// days (no date in the input) so reports can tell NEW from RETURNING visitors
+// (a hash seen on more than one day = returning) and still count daily uniques
+// (distinct hashes in a day). Trade-off vs the old daily-rotating hash: a person
+// is linkable across days by network+browser — but there's still no raw IP and
+// no cookie, so the sites stay consent-free. Salt is a per-deploy secret; set
+// VISITOR_HASH_SALT to a random string in prod (unset → works but guessable).
 const HASH_SALT = process.env.VISITOR_HASH_SALT || 'mailer-admin-visits-v1'
 async function visitorHash(property: string, ip: string, ua: string): Promise<string | null> {
   try {
-    const input = `${HASH_SALT}|${etDate(new Date())}|${property}|${ip}|${ua}`
+    const input = `${HASH_SALT}|${property}|${ip}|${ua}`
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
     return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32)
   } catch {

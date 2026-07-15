@@ -229,6 +229,21 @@ export default function VisitsClient({
   const last7UniqueSub = uniqueSub(inLast(7 * 24 * 3600_000))
   const last30UniqueSub = uniqueSub(() => true)
 
+  // New vs returning over the loaded ~30 days, from the stable visitor_hash: a
+  // visitor (distinct hash) seen on 2+ distinct days is "returning"; 1 day is
+  // "new". Ramps up — older daily-rotating hashes appear on one day each, so
+  // they read as "new" until enough stable-hash data accumulates.
+  const daysByHash = new Map<string, Set<string>>()
+  for (const v of visits) {
+    if (!v.visitor_hash) continue
+    let s = daysByHash.get(v.visitor_hash)
+    if (!s) { s = new Set<string>(); daysByHash.set(v.visitor_hash, s) }
+    s.add(localDate(v.created_at))
+  }
+  let newVisitors = 0, returningVisitors = 0
+  for (const s of daysByHash.values()) { if (s.size >= 2) returningVisitors++; else newVisitors++ }
+  const nrTotal = newVisitors + returningVisitors
+
   // Breakdown window: the cards below (region / source / device / campaign /
   // conversion) are scoped to this window — not always 30d. The 30d rows are
   // already loaded, so switching is instant and fully client-side.
@@ -301,6 +316,24 @@ export default function VisitsClient({
             <Stat t={t} label="Last 30 days"   value={last30} tone="muted" sub={last30UniqueSub} />
             <Stat t={t} label="Signup rate (30d)" display={overallRate == null ? '—' : `${(overallRate * 100).toFixed(1)}%`} value={signups.length} tone="accent" />
           </div>
+
+          {nrTotal > 0 && (
+            <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '16px 20px', marginBottom: 28 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: t.mutedText }}>New vs returning · last 30 days</span>
+                <span style={{ fontSize: 13, color: t.mutedText }}>{Math.round((returningVisitors / nrTotal) * 100)}% returning</span>
+              </div>
+              <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', background: t.headerBg }}>
+                <div style={{ width: `${(newVisitors / nrTotal) * 100}%`, background: '#4A78B5' }} />
+                <div style={{ width: `${(returningVisitors / nrTotal) * 100}%`, background: t.accent }} />
+              </div>
+              <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 13, flexWrap: 'wrap' }}>
+                <span style={{ color: t.text }}><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: '#4A78B5', marginRight: 5 }} />New <b>{newVisitors.toLocaleString()}</b></span>
+                <span style={{ color: t.text }}><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: t.accent, marginRight: 5 }} />Returning <b>{returningVisitors.toLocaleString()}</b></span>
+                <span style={{ color: t.faintText }}>distinct visitors, by whether they came back on another day</span>
+              </div>
+            </div>
+          )}
 
           <WindowTabs t={t} win={win} setWin={setWin} />
 
