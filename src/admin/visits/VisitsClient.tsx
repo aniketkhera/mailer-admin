@@ -217,6 +217,14 @@ export default function VisitsClient({
   const t = theme
   const domain = brandDomain(appUrl, brandName)
 
+  // Fold self-referrals into "Direct". When someone clicks page-to-page within
+  // the site, document.referrer is the previous same-site page, so the tracker
+  // logs this domain as the referrer — internal navigation, not a real source.
+  const srcOf = (referrer: string | null): string => {
+    const h = refHost(referrer)
+    return h === domain || h.endsWith('.' + domain) ? 'Direct / none' : h
+  }
+
   const now = Date.now()
   const within = (ms: number) => visits.filter(v => now - new Date(v.created_at).getTime() <= ms).length
   // "Today" = calendar day in the configured timezone (resets at local
@@ -279,11 +287,11 @@ export default function VisitsClient({
   // so the bars always mean ET hours regardless of who's viewing or where it runs.
   const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hour12: false, hourCycle: 'h23' })
   const hourOf = (iso: string) => parseInt(hourFmt.format(new Date(iso)), 10) % 24
-  const bySourceHourly = buildHourly(wVisits, v => refHost(v.referrer), hourOf)
+  const bySourceHourly = buildHourly(wVisits, v => srcOf(v.referrer), hourOf)
   const byLocationHourly = buildHourly(wVisits, regionLabel, hourOf)
 
   const byRegion   = tally(wVisits, regionLabel)
-  const byReferrer = tally(wVisits, v => refHost(v.referrer))
+  const byReferrer = tally(wVisits, v => srcOf(v.referrer))
   const byDevice   = tally(wVisits, v => v.device)
   const byCampaign = tally(wVisits.filter(v => v.utm_source), v => v.utm_source)
 
@@ -306,7 +314,7 @@ export default function VisitsClient({
 
   // Conversion: visits vs signups, matched by normalized source + region —
   // scoped to the selected breakdown window.
-  const convBySource = buildConversion(wVisits, wSignups, v => refHost(v.referrer), s => refHost(s.referrer))
+  const convBySource = buildConversion(wVisits, wSignups, v => srcOf(v.referrer), s => srcOf(s.referrer))
   const convByRegion = buildConversion(wVisits, wSignups, regionLabel, regionLabel)
   const overallRate  = last30 > 0 ? signups.length / last30 : null
 
