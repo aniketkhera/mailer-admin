@@ -18,15 +18,43 @@ import { NOTRACK_COOKIE } from '../config'
 import { createSupabase } from '../lib/supabase'
 import { rateLimit, clientIp } from '../lib/rate-limit'
 
-// Lightweight bot detection from the user-agent. Not exhaustive — just
-// catches the obvious crawlers/monitors so they can be filtered out of
-// human-traffic reports. Anything flagged is still stored (is_bot=true).
-const BOT_RE = /bot|crawler|spider|crawl|slurp|bingpreview|facebookexternalhit|headless|lighthouse|pingdom|uptime|curl|wget|python-requests|axios|node-fetch|vercel-screenshot|gptbot|claudebot|ahrefs|semrush/i
+// Bot detection from the user-agent. Not exhaustive — a scraper spoofing a
+// real browser UA still slips through (dedup on visitor_hash + the digest's
+// repeat-visitor flood check are the second line of defense). But this catches
+// the large majority of declared crawlers/monitors/HTTP-clients so they can be
+// filtered out of human-traffic reports. Anything flagged is still stored
+// (is_bot=true) so bot volume itself remains reportable.
+const BOT_RE = /bot\b|bot\/|[a-z]bot|crawler|spider|crawl|slurp|bingpreview|facebookexternalhit|meta-externalagent|facebot|headless|lighthouse|pagespeed|pingdom|uptime|statuscake|site24x7|checkly|newrelic|datadog|zabbix|monitoring|curl|wget|python-requests|python-urllib|aiohttp|httpx|axios|node-fetch|go-http-client|okhttp|apache-httpclient|java\/|libwww|scrapy|phantomjs|puppeteer|playwright|selenium|vercel-screenshot|gptbot|oai-searchbot|chatgpt|claudebot|claude-web|anthropic|perplexitybot|ccbot|google-extended|googleother|google-inspectiontool|bytespider|petalbot|amazonbot|dataforseo|dotbot|mj12bot|ahrefs|semrush|screaming.?frog|dashlink|embedly|discordbot|slackbot|telegrambot|whatsapp|linkedinbot|twitterbot|pinterest/i
 
 function deviceFromUa(ua: string): 'mobile' | 'tablet' | 'desktop' {
   if (/ipad|tablet|playbook|silk/i.test(ua)) return 'tablet'
   if (/mobi|iphone|android.*mobile|phone/i.test(ua)) return 'mobile'
   return 'desktop'
+}
+
+// Eastern-time calendar date (YYYY-MM-DD). The visitor hash is scoped to the
+// ET day so it (a) rotates daily — a person is unlinkable across days, which
+// keeps this privacy-preserving and GDPR-friendly, and (b) lines up with the
+// digest's "today (ET)" window so within-day dedup is exact.
+function etDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d)
+}
+
+// Salted daily hash of ip+ua so we can count UNIQUE visitors (dedup repeat
+// page loads) and spot floods — WITHOUT ever storing a raw IP. The salt is a
+// per-deploy secret; if unset the hash still works but is more guessable, so
+// set VISITOR_HASH_SALT to a random string in prod.
+const HASH_SALT = process.env.VISITOR_HASH_SALT || 'mailer-admin-visits-v1'
+async function visitorHash(property: string, ip: string, ua: string): Promise<string | null> {
+  try {
+    const input = `${HASH_SALT}|${etDate(new Date())}|${property}|${ip}|${ua}`
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32)
+  } catch {
+    return null // Web Crypto unavailable — degrade to no-hash rather than fail the beacon.
+  }
 }
 
 export function createTrackRoute(cfg: MailerConfig) {
@@ -54,6 +82,9 @@ export function createTrackRoute(cfg: MailerConfig) {
 
       const ua = req.headers.get('user-agent') || ''
       const is_bot = BOT_RE.test(ua)
+      // Privacy-preserving per-visitor id: salted daily hash of ip+ua. Never
+      // stores the raw IP. Lets the reports dedup page loads → unique visitors.
+      const visitor_hash = await visitorHash(cfg.property, clientIp(req), ua)
 
       await supa.insertRow('visits', {
         property: cfg.property,
@@ -66,6 +97,8 @@ export function createTrackRoute(cfg: MailerConfig) {
         region: hdr(req, 'x-vercel-ip-country-region'),
         city: hdr(req, 'x-vercel-ip-city'),
         device: deviceFromUa(ua),
+        user_agent: ua ? ua.slice(0, 400) : null,
+        visitor_hash,
         is_bot,
       }, 'return=minimal')
     } catch (e) {
