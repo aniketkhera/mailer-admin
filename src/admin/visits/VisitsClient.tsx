@@ -275,7 +275,9 @@ export default function VisitsClient({
   const wSignups = signups.filter(s => inWin(s.subscribed_at))
 
   // Hour-of-day histograms for the selected window, stacked by source + region.
-  const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: '2-digit', hour12: false, hourCycle: 'h23' })
+  // Bucketed by US East Coast time explicitly (not the visitor's/server's zone)
+  // so the bars always mean ET hours regardless of who's viewing or where it runs.
+  const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hour12: false, hourCycle: 'h23' })
   const hourOf = (iso: string) => parseInt(hourFmt.format(new Date(iso)), 10) % 24
   const bySourceHourly = buildHourly(wVisits, v => refHost(v.referrer), hourOf)
   const byLocationHourly = buildHourly(wVisits, regionLabel, hourOf)
@@ -360,8 +362,8 @@ export default function VisitsClient({
           <WindowTabs t={t} win={win} setWin={setWin} />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, marginBottom: 14 }}>
-            <StackedHourly t={t} title="By hour of day · source" data={bySourceHourly} />
-            <StackedHourly t={t} title="By hour of day · location" data={byLocationHourly} />
+            <StackedHourly t={t} title="By hour of day (ET) · source" data={bySourceHourly} />
+            <StackedHourly t={t} title="By hour of day (ET) · location" data={byLocationHourly} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14, marginBottom: 14 }}>
