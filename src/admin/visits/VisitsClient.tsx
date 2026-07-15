@@ -121,6 +121,36 @@ function brandDomain(appUrl: string, brandName: string): string {
 // browser sends with every /api/track beacon, so the operator's own
 // browsing is excluded from the stats. Admin login auto-sets it; this is
 // for other devices (phone, incognito) or to turn it back off.
+// ── Hourly (hour-of-day) stacked histogram ─────────────────────────────
+const HOURLY_COLORS = ['#e0845a', '#5C8A54', '#4A78B5', '#C9A227', '#8A5CB5', '#B3A79E']
+type HourlyData = { series: { label: string; color: string; counts: number[] }[]; hourTotals: number[]; max: number }
+
+// Bucket rows into 24 hour-of-day stacks split by keyFn (top-K + "Other").
+function buildHourly(rows: VisitRow[], keyFn: (v: VisitRow) => string, hourOf: (iso: string) => number, topK = 5): HourlyData {
+  const totalByKey = new Map<string, number>()
+  for (const v of rows) { const k = keyFn(v); totalByKey.set(k, (totalByKey.get(k) || 0) + 1) }
+  const top = [...totalByKey.entries()].sort((a, b) => b[1] - a[1]).slice(0, topK).map(([k]) => k)
+  const labels = [...top, ...(totalByKey.size > top.length ? ['Other'] : [])]
+  const idxOf = new Map<string, number>(top.map((l, i) => [l, i]))
+  const otherIdx = labels.length - 1
+  const counts: number[][] = labels.map(() => new Array(24).fill(0))
+  const hourTotals = new Array(24).fill(0)
+  for (const v of rows) {
+    const h = hourOf(v.created_at)
+    const li = idxOf.has(keyFn(v)) ? idxOf.get(keyFn(v))! : otherIdx
+    counts[li][h]++; hourTotals[h]++
+  }
+  const series = labels.map((label, i) => ({
+    label,
+    color: label === 'Other' ? HOURLY_COLORS[HOURLY_COLORS.length - 1] : HOURLY_COLORS[Math.min(i, HOURLY_COLORS.length - 2)],
+    counts: counts[i],
+  }))
+  return { series, hourTotals, max: Math.max(1, ...hourTotals) }
+}
+function hourAxisLabel(h: number): string {
+  return h === 0 ? '12a' : h === 6 ? '6a' : h === 12 ? '12p' : h === 18 ? '6p' : h === 23 ? '11p' : ''
+}
+
 function NotrackToggle({ t }: { t: Theme }) {
   const [excluded, setExcluded] = useState<boolean | null>(null)
   useEffect(() => {
@@ -210,6 +240,12 @@ export default function VisitsClient({
   const wVisits = visits.filter(v => inWin(v.created_at))
   const wSignups = signups.filter(s => inWin(s.subscribed_at))
 
+  // Hour-of-day histograms for the selected window, stacked by source + region.
+  const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: '2-digit', hour12: false, hourCycle: 'h23' })
+  const hourOf = (iso: string) => parseInt(hourFmt.format(new Date(iso)), 10) % 24
+  const bySourceHourly = buildHourly(wVisits, v => refHost(v.referrer), hourOf)
+  const byLocationHourly = buildHourly(wVisits, regionLabel, hourOf)
+
   const byRegion   = tally(wVisits, regionLabel)
   const byReferrer = tally(wVisits, v => refHost(v.referrer))
   const byDevice   = tally(wVisits, v => v.device)
@@ -267,6 +303,11 @@ export default function VisitsClient({
           </div>
 
           <WindowTabs t={t} win={win} setWin={setWin} />
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 14, marginBottom: 14 }}>
+            <StackedHourly t={t} title="By hour of day · source" data={bySourceHourly} />
+            <StackedHourly t={t} title="By hour of day · location" data={byLocationHourly} />
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14, marginBottom: 14 }}>
             <BarCard t={t} title="By region (state · country)" rows={byRegion} total={wVisits.length} />
@@ -335,6 +376,50 @@ function Stat({ t, label, value, display, sub, tone = 'normal' }: { t: Theme; la
       <div style={{ fontSize: 28, fontWeight: 800, color }}>{display ?? value.toLocaleString()}</div>
       {display != null && <div style={{ fontSize: 12, color: t.faintText, marginTop: 2 }}>{value.toLocaleString()} signups</div>}
       {sub && <div style={{ fontSize: 12, color: t.faintText, marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function StackedHourly({ t, title, data }: { t: Theme; title: string; data: HourlyData }) {
+  const H = 130
+  const empty = data.hourTotals.every(n => n === 0)
+  return (
+    <div style={{ background: t.panelBg, border: `1px solid ${t.border}`, borderRadius: 14, padding: '18px 20px' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: t.mutedText, marginBottom: 14 }}>
+        {title}
+      </div>
+      {empty ? (
+        <div style={{ fontSize: 13, color: t.faintText, lineHeight: 1.5 }}>No visits in this window.</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 14 }}>
+            {data.series.map(s => (
+              <span key={s.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: t.mutedText, maxWidth: '100%' }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: H }}>
+            {Array.from({ length: 24 }, (_, h) => {
+              const hct = data.hourTotals[h]
+              const barH = hct ? Math.max(2, Math.round((hct / data.max) * H)) : 0
+              return (
+                <div key={h} title={`${hourAxisLabel(h) || `${h}:00`} · ${hct} views`} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                  <div style={{ height: barH, display: 'flex', flexDirection: 'column', borderRadius: '3px 3px 0 0', overflow: 'hidden' }}>
+                    {data.series.map(s => (s.counts[h] ? <div key={s.label} style={{ height: `${(s.counts[h] / hct) * 100}%`, background: s.color }} /> : null))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 2, marginTop: 5 }}>
+            {Array.from({ length: 24 }, (_, h) => (
+              <div key={h} style={{ flex: 1, textAlign: 'center', fontSize: 9, color: t.faintText }}>{hourAxisLabel(h)}</div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
