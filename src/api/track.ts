@@ -74,7 +74,10 @@ export function createTrackRoute(cfg: MailerConfig) {
       if (path && path.startsWith('/admin')) return new NextResponse(null, { status: 204 })
 
       const ua = req.headers.get('user-agent') || ''
-      const is_bot = BOT_RE.test(ua)
+      // Shared declared-crawler regex, OR the site's own fingerprint (see
+      // MailerConfig.extraBotPattern). Flagged rows are still stored — is_bot
+      // only drops them from the human-traffic reports.
+      const is_bot = BOT_RE.test(ua) || (cfg.extraBotPattern ? cfg.extraBotPattern.test(ua) : false)
       // Privacy-preserving per-visitor id: salted daily hash of ip+ua. Never
       // stores the raw IP. Lets the reports dedup page loads → unique visitors.
       const visitor_hash = await visitorHash(cfg.property, clientIp(req), ua)

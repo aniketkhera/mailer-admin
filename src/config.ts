@@ -80,6 +80,24 @@ export type MailerConfig = {
   signupTags?: { field: string; prefix: string }[]
   /** Send the welcome email on new signup. Default: true. */
   welcomeEmails?: boolean
+  /** Extra site-local user-agent pattern flagged as a bot, OR'd with the
+   *  package's shared BOT_RE at insert time (`visits.is_bot`). Rows are still
+   *  STORED — is_bot only excludes them from the human-traffic reports.
+   *
+   *  For site-specific fingerprints that must NOT apply portfolio-wide. The
+   *  motivating case: squashtigers is hit by a headless fleet presenting
+   *  `X11; Linux x86_64` + Chrome, which asserts `document.referrer =
+   *  google.com` (the tracker stores that verbatim, so it can't be trusted).
+   *  Measured 2026-07-17: 12/12 such beacons claimed google.com and landed on
+   *  a blog post, while 0/3 real visitors did — a clean split. Desktop Linux
+   *  is ~0% of a junior-squash audience, so the rule is safe THERE and wrong
+   *  for a developer-facing site like orangish.io. Hence per-site, never shared.
+   *
+   *  Caveat: a user-agent is a fingerprint, and fingerprints drift. If the
+   *  google.com share climbs back up, this stopped matching — re-check the
+   *  transport before widening it. Default: none. */
+  extraBotPattern?: RegExp
+
   /** IANA tz for the Traffic "today" bucket. Default America/New_York. */
   timezone?: string
   /** Address notified on new signups. Default: none. */
