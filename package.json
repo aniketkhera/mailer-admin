@@ -1,6 +1,6 @@
 {
   "name": "mailer-admin",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "private": true,
   "type": "module",
   "description": "Shared, themeable, config-injected mailing-list + analytics admin for the sibling sites. Consumed via transpilePackages + a git dependency.",

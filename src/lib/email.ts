@@ -156,6 +156,10 @@ export function renderEmailHtml(cfg: MailerConfig, args: EmailShellArgs): string
   const bg = cfg.theme.pageBg
   const accent = cfg.theme.accent
   const address = cfg.email.physicalAddress
+  const logoUrl = cfg.email.logoUrl
+  const logoImg = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(brand)}" width="46" height="46" style="display:block;border:0;outline:none;text-decoration:none;width:46px;height:46px;border-radius:50%;margin:0 0 10px 0;" />`
+    : ''
   const signupContext = cfg.email.signupContext || `you signed up at ${brand}`
   const contact = cfg.email.contactEmail
   const contactLink = contact
@@ -181,6 +185,7 @@ export function renderEmailHtml(cfg: MailerConfig, args: EmailShellArgs): string
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;background:#FFFFFF;border:1px solid #E8D5C8;border-radius:14px;overflow:hidden;">
 
         <tr><td style="padding:24px 32px 12px 32px;border-bottom:1px solid #F4E8DD;">
+          ${logoImg}
           <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:${accent};">
             ${escapeHtml(brand)}
           </div>

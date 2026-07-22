@@ -64,6 +64,10 @@ export type MailerConfig = {
     contactEmail?: string
     /** Footer "you're receiving this because <signupContext>". Default: "you signed up at <brandName>". */
     signupContext?: string
+    /** Optional absolute URL to a brand logo shown in the email header, above
+     *  the brand name. Must be a full https:// URL (email clients can't resolve
+     *  relative paths). Omit → header shows the brand-name text only (unchanged). */
+    logoUrl?: string
   }
   theme: Theme
   /** Tag-segments surfaced in the admin (e.g. sport interest). Default: none → the UI hides. */
