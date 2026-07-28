@@ -288,7 +288,7 @@ export async function sendMailer(cfg: MailerConfig, args: SendArgs): Promise<Sen
   return report
 }
 
-export async function sendOne(cfg: MailerConfig, args: { to: string; subject: string; html: string }): Promise<void> {
+export async function sendOne(cfg: MailerConfig, args: { to: string | string[]; subject: string; html: string }): Promise<void> {
   const key = cfg.resend.apiKey
   if (!key) throw new Error('RESEND_API_KEY is not set')
   const resend = new Resend(key)

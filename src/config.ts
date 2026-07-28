@@ -104,8 +104,9 @@ export type MailerConfig = {
 
   /** IANA tz for the Traffic "today" bucket. Default America/New_York. */
   timezone?: string
-  /** Address notified on new signups. Default: none. */
-  notifyEmail?: string | null
+  /** Address(es) notified on new signups — a single email or a list (Resend
+   *  accepts both shapes natively). Default: none. */
+  notifyEmail?: string | string[] | null
   /** Extra site-local nav tabs appended to the shared AdminNav (e.g. orangish Roadmap). */
   extraNavTabs?: { href: string; label: string }[]
   /** OPTIONAL "Send a blog post" composer mode. The package stays CMS-agnostic:
