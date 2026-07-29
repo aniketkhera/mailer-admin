@@ -82,6 +82,14 @@ export type MailerConfig = {
   /** Extra public-signup form fields to record as subscriber tags, e.g.
    *  [{ field: 'zipCode', prefix: 'zip:' }] → tags ['zip:08540']. */
   signupTags?: { field: string; prefix: string }[]
+  /** Subscriber `source` values that count as on-site form signups in the
+   *  Traffic → conversion funnel. Migrated / imported / manually-added
+   *  subscribers are excluded — they have no matching visit and would distort
+   *  the rate. Set this to the sources your PUBLIC forms actually write, e.g.
+   *  squashtigers uses ['trial-form','adult-enquiry-form']. Default (when
+   *  unset): ['homepage'], the historical value — so a property that hasn't
+   *  opted in keeps its existing behaviour. */
+  signupSources?: string[]
   /** Send the welcome email on new signup. Default: true. */
   welcomeEmails?: boolean
   /** Extra site-local user-agent pattern flagged as a bot, OR'd with the

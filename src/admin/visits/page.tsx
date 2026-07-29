@@ -46,18 +46,24 @@ export function createVisitsPage(cfg: MailerConfig) {
     }
   }
 
-  // Signups in the same 30-day window. Filtered to source='homepage' —
-  // the people who came through the on-site form (i.e. through a tracked
-  // visit). Migrated / manually-added subscribers aren't part of the
-  // visit→signup funnel and would distort conversion (signups with no
-  // matching visit). This keeps rates ≤ ~100% and meaningful.
+  // Signups in the same 30-day window, restricted to the on-site form sources
+  // (i.e. people who came through a tracked visit). Migrated / imported /
+  // manually-added subscribers aren't part of the visit→signup funnel and
+  // would distort conversion (signups with no matching visit). This keeps
+  // rates ≤ ~100% and meaningful.
+  //
+  // Sources come from cfg.signupSources (e.g. squashtigers's
+  // ['trial-form','adult-enquiry-form']); default ['homepage'] preserves the
+  // historical behaviour for properties that haven't set it. Uses PostgREST
+  // `source=in.(a,b)`; URLSearchParams encodes the parens/commas for us.
   async function loadSignups(): Promise<SignupRow[]> {
     if (!supa.configured()) return []
     try {
       const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
+      const sources = cfg.signupSources?.length ? cfg.signupSources : ['homepage']
       const { rows } = await supa.selectAll<SignupRow>('subscribers', {
         select: 'referrer,utm_source,region,country,tags,subscribed_at',
-        filters: { property: `eq.${cfg.property}`, source: 'eq.homepage', subscribed_at: `gte.${since}` },
+        filters: { property: `eq.${cfg.property}`, source: `in.(${sources.join(',')})`, subscribed_at: `gte.${since}` },
         order: 'subscribed_at.desc',
       })
       return rows

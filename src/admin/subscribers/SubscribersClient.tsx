@@ -30,7 +30,7 @@ type ImportResult = {
   suppressed?: number
 }
 
-const COLSPAN = 7
+const COLSPAN = 8
 
 export default function SubscribersClient({
   initialRows, loadError, theme, segments, brandName,
@@ -503,6 +503,7 @@ export default function SubscribersClient({
               <SortTh label="Phone"   k="phone"   />
               <SortTh label="City"    k="city"    />
               <SortTh label="Country" k="country" />
+              <SortTh label="Subscribed" k="subscribed_at" />
               <Th />
             </tr>
           </thead>
@@ -541,6 +542,16 @@ export default function SubscribersClient({
                     <Td><span style={{ color: t.mutedText, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.phone || <Dash />}</span></Td>
                     <Td><span style={{ color: t.mutedText }}>{r.city || <Dash />}</span></Td>
                     <Td><span style={{ color: t.mutedText, whiteSpace: 'nowrap' }}>{r.country || <Dash />}</span></Td>
+                    <Td>
+                      {(() => {
+                        const d = r.subscribed_at ? new Date(r.subscribed_at) : null
+                        return d && !isNaN(d.getTime())
+                          ? <span title={d.toLocaleString()} style={{ color: t.mutedText, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                              {d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                            </span>
+                          : <Dash />
+                      })()}
+                    </Td>
                     <Td align="right">
                       {editing ? (
                         <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
