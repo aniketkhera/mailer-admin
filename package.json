@@ -1,6 +1,6 @@
 {
   "name": "mailer-admin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "Shared, themeable, config-injected mailing-list + analytics admin for the sibling sites. Consumed via transpilePackages + a git dependency.",
@@ -23,6 +23,7 @@
     "./api/auth-logout": "./src/api/auth-logout.ts",
     "./api/subscribe": "./src/api/subscribe.ts",
     "./api/track": "./src/api/track.ts",
+    "./TrackBeacon": "./src/public/TrackBeacon.tsx",
     "./api/unsubscribe": "./src/api/unsubscribe.ts",
     "./api/resubscribe": "./src/api/resubscribe.ts",
     "./api/lead": "./src/api/lead.ts",
