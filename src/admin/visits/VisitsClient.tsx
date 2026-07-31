@@ -316,6 +316,7 @@ export default function VisitsClient({
   const bySourceStacks = buildStacks(wVisits, v => srcOf(v.referrer), bucketOf, bucketCount)
   const byLocationStacks = buildStacks(wVisits, regionLabel, bucketOf, bucketCount)
 
+  const byPage     = tally(wVisits, v => (!v.path || v.path === '/') ? 'Home' : v.path.split('?')[0])
   const byRegion   = tally(wVisits, regionLabel)
   const byReferrer = tally(wVisits, v => srcOf(v.referrer))
   const byDevice   = tally(wVisits, v => v.device)
@@ -401,6 +402,7 @@ export default function VisitsClient({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 14, marginBottom: 14 }}>
+            <BarCard t={t} title="Most visited pages" rows={byPage} total={wVisits.length} />
             <BarCard t={t} title="By region (state · country)" rows={byRegion} total={wVisits.length} />
             <BarCard t={t} title="Where they came from" rows={byReferrer} total={wVisits.length} />
             <BarCard t={t} title="Device" rows={byDevice} total={wVisits.length} />
