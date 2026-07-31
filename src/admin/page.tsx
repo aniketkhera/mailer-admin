@@ -15,6 +15,7 @@ import Link from 'next/link'
 import type { MailerConfig, Theme } from '../config'
 import { createSupabase } from '../lib/supabase'
 import { createAuth } from '../lib/auth'
+import DashboardTrafficClient, { type DashVisit, type DashSignup } from './DashboardTrafficClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,11 +65,39 @@ export function createDashboardPage(cfg: MailerConfig) {
     }
   }
 
+  // Last-30-day human visits + funnel signups for the top-of-dashboard traffic
+  // strip. Same source + shape the full /admin/visits page loads (lighter select
+  // — the summary only needs visitor/source/time), so the two always agree. MUST
+  // paginate: a plain PostgREST select silently caps at 1000 rows.
+  async function loadTraffic(): Promise<{ visits: DashVisit[]; signups: DashSignup[] }> {
+    if (!supa.configured()) return { visits: [], signups: [] }
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
+      const sources = cfg.signupSources?.length ? cfg.signupSources : ['homepage']
+      const [visitsRes, signupsRes] = await Promise.all([
+        supa.selectAll<DashVisit>('visits', {
+          select: 'path,visitor_hash,utm_source,referrer,created_at',
+          filters: { property: `eq.${cfg.property}`, is_bot: 'eq.false', created_at: `gte.${since}` },
+          order: 'created_at.desc',
+        }),
+        supa.selectAll<DashSignup>('subscribers', {
+          select: 'subscribed_at',
+          filters: { property: `eq.${cfg.property}`, source: `in.(${sources.join(',')})`, subscribed_at: `gte.${since}` },
+          order: 'subscribed_at.desc',
+        }),
+      ])
+      return { visits: visitsRes.rows.filter(v => !v.path?.startsWith('/admin')), signups: signupsRes.rows }
+    } catch (e) {
+      console.error('[mailer-admin /admin] traffic load failed:', e instanceof Error ? e.message : e)
+      return { visits: [], signups: [] }
+    }
+  }
+
   return async function AdminDashboardPage() {
     const session = await auth.getAdminSession()
     if (!session) redirect('/admin/login')
 
-    const { counts, lastMailer } = await loadStats()
+    const [{ counts, lastMailer }, traffic] = await Promise.all([loadStats(), loadTraffic()])
 
     return (
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px' }}>
@@ -76,9 +105,21 @@ export function createDashboardPage(cfg: MailerConfig) {
           Welcome back.
         </h1>
         <p style={{ fontSize: 14, color: t.mutedText, margin: '0 0 28px 0' }}>
-          Mailing list + outreach for {cfg.brandName}.
+          Mailing list, outreach, and traffic for {cfg.brandName}.
         </p>
 
+        <DashboardTrafficClient
+          visits={traffic.visits}
+          signups={traffic.signups}
+          theme={t}
+          brandName={cfg.brandName}
+          appUrl={cfg.appUrl}
+          timezone={cfg.timezone || 'America/New_York'}
+        />
+
+        <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: t.faintText, marginBottom: 12 }}>
+          Audience
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 28 }}>
           <Stat theme={t} label="Active subscribers" value={counts.active} />
           <Stat theme={t} label="Unsubscribed"       value={counts.unsubscribed} tone="muted" />
