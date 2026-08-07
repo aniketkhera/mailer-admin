@@ -117,6 +117,19 @@ export type MailerConfig = {
   notifyEmail?: string | string[] | null
   /** Extra site-local nav tabs appended to the shared AdminNav (e.g. orangish Roadmap). */
   extraNavTabs?: { href: string; label: string }[]
+  /** OPTIONAL full replacement for the admin nav tab list — labels AND order,
+   *  site-local tabs included. Set this when a brand wants different wording or
+   *  a different order from the shared default (e.g. squashtigers calls Compose
+   *  "Newsletter" and leads with Traffic). When set, `extraNavTabs` is ignored:
+   *  this list IS the nav, so there is one obvious place to read the order off.
+   *
+   *  Per-site rather than a change to the shared BASE_TABS precisely so one
+   *  brand's vocabulary can't leak into the other six admins.
+   *
+   *  Hrefs still drive the active-tab highlight, so they must match the real
+   *  routes (`/admin`, `/admin/subscribers`, `/admin/compose`, `/admin/welcome`,
+   *  `/admin/sends`, `/admin/visits`). Default: unset → BASE_TABS + extraNavTabs. */
+  navTabs?: { href: string; label: string }[]
   /** OPTIONAL "Send a blog post" composer mode. The package stays CMS-agnostic:
    *  the site injects both functions (Sanity, MDX, a DB, …). When `loadPosts`
    *  is set the composer surfaces a Newsletter|Blog-post toggle + post picker;

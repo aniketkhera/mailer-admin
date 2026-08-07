@@ -27,16 +27,21 @@ function isActiveTab(pathname: string, href: string): boolean {
 }
 
 export function AdminNav({
-  theme, brandName, email, extraNavTabs = [],
+  theme, brandName, email, extraNavTabs = [], navTabs,
 }: {
   theme: Theme
   brandName: string
   email: string
   extraNavTabs?: { href: string; label: string }[]
+  /** Full replacement for the tab list — see MailerConfig.navTabs. */
+  navTabs?: { href: string; label: string }[]
 }) {
   const t = theme
   const pathname = usePathname() || ''
-  const items = [...BASE_TABS, ...extraNavTabs]
+  // `navTabs` is the site's complete list (labels AND order, extras included),
+  // so a brand can rename or reorder the shared tabs without every other site
+  // inheriting its wording. Unset → the historical BASE_TABS + extras.
+  const items = navTabs?.length ? navTabs : [...BASE_TABS, ...extraNavTabs]
 
   return (
     <header style={{ background: t.panelBg, borderBottom: `1px solid ${t.border}` }}>

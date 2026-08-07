@@ -36,6 +36,7 @@ export function createAdminLayout(cfg: MailerConfig) {
             brandName={cfg.brandName}
             email={session.email}
             extraNavTabs={cfg.extraNavTabs || []}
+            navTabs={cfg.navTabs}
           />
         )}
         {children}
