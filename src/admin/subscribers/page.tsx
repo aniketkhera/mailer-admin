@@ -12,7 +12,7 @@ import { redirect } from 'next/navigation'
 import type { MailerConfig } from '../../config'
 import { createSupabase } from '../../lib/supabase'
 import { createAuth } from '../../lib/auth'
-import { SUBSCRIBERS_SELECT } from '../../api/subscribers'
+import { SUBSCRIBERS_SELECT, SUBSCRIBERS_ORDER } from '../../api/subscribers'
 import SubscribersClient, { type SubscriberRow } from './SubscribersClient'
 
 export function createSubscribersPage(cfg: MailerConfig) {
@@ -28,12 +28,17 @@ export function createSubscribersPage(cfg: MailerConfig) {
 
     if (supa.configured()) {
       try {
-        rows = await supa.selectRows<SubscriberRow>('subscribers', {
+        // MUST paginate: a single select stops at PostgREST's 1000-row cap.
+        // On 2026-10-26 squashtigers reached 1,035 rows and this page showed
+        // "All 1000 / Active 885 / Unsubscribed 115" with the 35 oldest rows
+        // missing — the client derives every count from the rows it is given.
+        const res = await supa.selectAll<SubscriberRow>('subscribers', {
           select: SUBSCRIBERS_SELECT,
           filters: { property: `eq.${cfg.property}` },
-          order: 'subscribed_at.desc',
-          limit: 1000,
+          order: SUBSCRIBERS_ORDER,
         })
+        rows = res.rows
+        if (res.capped) console.warn('[mailer-admin subscribers] hit the 100k pagination cap — list is truncated.')
       } catch (e) {
         loadError = e instanceof Error ? e.message : 'Could not load subscribers.'
       }

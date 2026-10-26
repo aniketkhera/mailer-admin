@@ -94,6 +94,28 @@ export function createSupabase(cfg: MailerConfig) {
     return { rows: out, capped: true }
   }
 
+  /**
+   * Exact row count for a filter, without reading the rows: a HEAD request
+   * with `Prefer: count=exact`, total read off the end of Content-Range
+   * ("0-0/1035"; the range part is "*" when nothing matches). Counting
+   * `selectRows(...).length` silently tops out at the 1000-row cap — on
+   * 2026-10-26 the squashtigers list reached 1,035 and the dashboard would
+   * have read total 1000 / active 883 instead of 1035 / 918. Throws rather
+   * than guess when the header carries no total.
+   */
+  async function count(table: string, filters: Record<string, string> = {}): Promise<number> {
+    const res = await fetch(buildUrl(table, { filters, limit: 1 }), {
+      method: 'HEAD',
+      headers: headers('count=exact'),
+      cache: 'no-store',
+    })
+    if (!res.ok) throw new Error(`supabase count ${table}: ${res.status}`)
+    const range = res.headers.get('content-range')
+    const m = range?.match(/\/(\d+)$/)
+    if (!m) throw new Error(`supabase count ${table}: no total in Content-Range ${JSON.stringify(range)}`)
+    return Number(m[1])
+  }
+
   async function insertRow<T = Record<string, unknown>>(
     table: string,
     row: Record<string, unknown>,
@@ -141,5 +163,5 @@ export function createSupabase(cfg: MailerConfig) {
     return `${url}/storage/v1/object/public/${BUCKET}/${objectKey}`
   }
 
-  return { property: cfg.property, configured, selectRows, selectOne, selectAll, insertRow, insertRows, updateRows, uploadImage }
+  return { property: cfg.property, configured, selectRows, selectOne, selectAll, count, insertRow, insertRows, updateRows, uploadImage }
 }

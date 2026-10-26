@@ -44,19 +44,20 @@ export function createDashboardPage(cfg: MailerConfig) {
     }
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString()
-      const [all, unsub, recent, lastMailerRows] = await Promise.all([
-        supa.selectRows<{ id: string }>('subscribers', { select: 'id', filters: { property: `eq.${cfg.property}` } }),
-        supa.selectRows<{ id: string }>('subscribers', { select: 'id', filters: { property: `eq.${cfg.property}`, unsubscribed_at: 'not.is.null' } }),
-        supa.selectRows<{ id: string }>('subscribers', { select: 'id', filters: { property: `eq.${cfg.property}`, subscribed_at: `gte.${sevenDaysAgo}`, unsubscribed_at: 'is.null' } }),
+      // Real counts, not `.length` of a select: a select stops at PostgREST's
+      // 1000-row cap, so once squashtigers passed 1,000 (2026-10-26: 1,035 =
+      // 918 active + 117 unsubscribed) "Total ever" froze at 1000 and Active,
+      // derived as total − unsubscribed, read 883. Active is counted directly
+      // rather than derived, so it cannot drift from the Subscribers page.
+      const [total, active, unsubscribed, last7, lastMailerRows] = await Promise.all([
+        supa.count('subscribers', { property: `eq.${cfg.property}` }),
+        supa.count('subscribers', { property: `eq.${cfg.property}`, unsubscribed_at: 'is.null' }),
+        supa.count('subscribers', { property: `eq.${cfg.property}`, unsubscribed_at: 'not.is.null' }),
+        supa.count('subscribers', { property: `eq.${cfg.property}`, subscribed_at: `gte.${sevenDaysAgo}`, unsubscribed_at: 'is.null' }),
         supa.selectRows<Mailer>('mailers', { select: 'id,subject,sent_at,recipient_count', filters: { property: `eq.${cfg.property}` }, order: 'sent_at.desc', limit: 1 }),
       ])
       return {
-        counts: {
-          total: all.length,
-          active: all.length - unsub.length,
-          unsubscribed: unsub.length,
-          last7: recent.length,
-        },
+        counts: { total, active, unsubscribed, last7 },
         lastMailer: lastMailerRows[0] || null,
       }
     } catch (e) {

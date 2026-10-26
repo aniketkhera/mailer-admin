@@ -10,6 +10,13 @@ import { segmentTag } from '../lib/segments'
 export const SUBSCRIBERS_SELECT =
   'id,email,first_name,last_name,phone,city,country,source,tags,subscribed_at,unsubscribed_at,import_metadata'
 
+// Newest first, with `id` breaking ties. Every full-list read goes through
+// selectAll, which pages by offset, and offset paging can skip or repeat a
+// row unless the order is TOTAL: an import stamps each undated CSV row with
+// the time of the import, so hundreds of rows can share one subscribed_at.
+// Shared by the Subscribers page, this GET and the composer.
+export const SUBSCRIBERS_ORDER = 'subscribed_at.desc,id.desc'
+
 export function createSubscribersRoute(cfg: MailerConfig) {
   const supa = createSupabase(cfg)
   const auth = createAuth(cfg)
@@ -18,12 +25,16 @@ export function createSubscribersRoute(cfg: MailerConfig) {
     const session = await auth.getAdminSession()
     if (!session) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
     try {
-      const rows = await supa.selectRows('subscribers', {
+      // MUST paginate. This is what the Subscribers page re-reads after every
+      // add / import / unsubscribe, and it used to ask for `limit: 1000` — on
+      // 2026-10-26 the squashtigers list reached 1,035 and the 35 oldest rows
+      // dropped out of the list and its All / Active / Unsubscribed counts.
+      const { rows, capped } = await supa.selectAll('subscribers', {
         select: SUBSCRIBERS_SELECT,
         filters: { property: `eq.${cfg.property}` },
-        order: 'subscribed_at.desc',
-        limit: 1000,
+        order: SUBSCRIBERS_ORDER,
       })
+      if (capped) console.warn('[mailer-admin subscribers GET] hit the 100k pagination cap — list is truncated.')
       return NextResponse.json({ rows })
     } catch (e) {
       console.error('[mailer-admin subscribers GET]', e instanceof Error ? e.message : e)

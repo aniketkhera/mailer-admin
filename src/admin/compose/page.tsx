@@ -17,6 +17,7 @@ import { redirect } from 'next/navigation'
 import type { MailerConfig, PostListItem } from '../../config'
 import { createSupabase } from '../../lib/supabase'
 import { createAuth } from '../../lib/auth'
+import { SUBSCRIBERS_ORDER } from '../../api/subscribers'
 import ComposeClient, { type RecipientRow } from './ComposeClient'
 
 export function createComposePage(cfg: MailerConfig) {
@@ -32,12 +33,17 @@ export function createComposePage(cfg: MailerConfig) {
 
     if (supa.configured()) {
       try {
-        recipients = await supa.selectRows<RecipientRow>('subscribers', {
+        // MUST paginate. This used to ask for `limit: 5000`, but PostgREST
+        // silently caps a response at 1000 rows, so once a list has more than
+        // 1,000 ACTIVE subscribers the picker — and "All" — quietly leaves out
+        // the oldest ones. squashtigers reached 918 active on 2026-10-26.
+        const res = await supa.selectAll<RecipientRow>('subscribers', {
           select: 'id,email,first_name,last_name,source,tags',
           filters: { property: `eq.${cfg.property}`, unsubscribed_at: 'is.null' },
-          order: 'subscribed_at.desc',
-          limit: 5000,
+          order: SUBSCRIBERS_ORDER,
         })
+        recipients = res.rows
+        if (res.capped) console.warn('[mailer-admin compose] hit the 100k pagination cap — recipient list is truncated.')
       } catch (e) {
         loadError = e instanceof Error ? e.message : 'Could not load recipients.'
       }

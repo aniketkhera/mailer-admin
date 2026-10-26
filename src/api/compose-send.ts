@@ -44,7 +44,9 @@ export function createSendRoute(cfg: MailerConfig) {
     }
     const subject = (body.subject || '').trim()
     const body_md = (body.body_md || '').trim()
-    const ids = Array.isArray(body.recipient_ids) ? body.recipient_ids.filter(s => typeof s === 'string') : []
+    // De-duplicated: the lookup below runs in chunks, and an id listed twice
+    // could land in two chunks and come back twice — two emails to one person.
+    const ids = Array.isArray(body.recipient_ids) ? [...new Set(body.recipient_ids.filter(s => typeof s === 'string'))] : []
     if (!subject)         return NextResponse.json({ error: 'Subject required.' }, { status: 400 })
     if (!body_md)         return NextResponse.json({ error: 'Body required.' }, { status: 400 })
     if (ids.length === 0) return NextResponse.json({ error: 'Pick at least one recipient.' }, { status: 400 })
@@ -54,18 +56,23 @@ export function createSendRoute(cfg: MailerConfig) {
 
     // Re-fetch recipients server-side. We filter unsubscribed_at IS NULL
     // again here in case someone unsubbed between picker load and send.
-    // PostgREST `in.(...)` filter handles the bulk lookup.
-    let rows: RecipientLoad[]
+    // Chunked, 200 ids per `in.(...)`, like the import's lookups: this used to
+    // be ONE request carrying every id, which put ~39 bytes of URL per
+    // recipient on the wire (918 active on squashtigers on 2026-10-26 ≈ 35 KB)
+    // and, past 1,000 recipients, would have been cut to 1000 rows by
+    // PostgREST's cap — the rest silently not emailed.
+    const rows: RecipientLoad[] = []
     try {
-      rows = await supa.selectRows<RecipientLoad>('subscribers', {
-        select: 'id,email,unsubscribe_token',
-        filters: {
-          property: `eq.${cfg.property}`,
-          id: `in.(${ids.join(',')})`,
-          unsubscribed_at: 'is.null',
-        },
-        limit: ids.length,
-      })
+      for (const part of chunk(ids, 200)) {
+        rows.push(...await supa.selectRows<RecipientLoad>('subscribers', {
+          select: 'id,email,unsubscribe_token',
+          filters: {
+            property: `eq.${cfg.property}`,
+            id: `in.(${part.join(',')})`,
+            unsubscribed_at: 'is.null',
+          },
+        }))
+      }
     } catch (e) {
       console.error('[mailer-admin compose/send] recipient lookup failed:', e instanceof Error ? e.message : e)
       return NextResponse.json({ error: 'Could not load recipients.' }, { status: 500 })
@@ -115,4 +122,10 @@ export function createSendRoute(cfg: MailerConfig) {
   }
 
   return { POST }
+}
+
+function chunk<T>(arr: T[], n: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n))
+  return out
 }
