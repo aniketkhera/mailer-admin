@@ -30,7 +30,7 @@ import { rateLimit, clientIp } from '../lib/rate-limit'
 import {
   sendOne,
   unsubscribeUrl,
-  markdownToEmailHtml,
+  emailBodyHtml,
   renderEmailHtml,
 } from '../lib/email'
 
@@ -206,7 +206,7 @@ async function sendWelcomeIfEnabled(
     if (!w || !w.enabled || !w.subject?.trim() || !w.body_md?.trim()) return
     const html = renderEmailHtml(cfg, {
       subject: w.subject,
-      bodyHtml: markdownToEmailHtml(w.body_md, { linkColor: cfg.theme.accent }),
+      bodyHtml: emailBodyHtml(cfg, w.body_md),
       unsubscribeUrl: token ? unsubscribeUrl(cfg, token) : '#',
     })
     await sendOne(cfg, { to: email, subject: w.subject, html })

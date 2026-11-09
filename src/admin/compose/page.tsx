@@ -17,6 +17,7 @@ import { redirect } from 'next/navigation'
 import type { MailerConfig, PostListItem } from '../../config'
 import { createSupabase } from '../../lib/supabase'
 import { createAuth } from '../../lib/auth'
+import { styledShellOpts } from '../../lib/email'
 import { SUBSCRIBERS_ORDER } from '../../api/subscribers'
 import ComposeClient, { type RecipientRow } from './ComposeClient'
 
@@ -74,6 +75,7 @@ export function createComposePage(cfg: MailerConfig) {
             contactEmail: cfg.email.contactEmail || null,
           }}
           posts={posts}
+          styledShell={styledShellOpts(cfg)}
         />
       </main>
     )

@@ -10,19 +10,22 @@
 
 import { useMemo, useState } from 'react'
 import type { Theme } from '../../config'
-import { markdownToEmailHtml } from '../../lib/email'
+import { markdownToEmailHtml, renderStyledEmailHtml, type StyledShellOpts } from '../../lib/email'
 
 export type WelcomeInitial = { subject: string; body_md: string; enabled: boolean }
 type Flash = { kind: 'ok' | 'err'; msg: string } | null
 
 export default function WelcomeClient({
-  initial, adminEmail, theme, brandName, signupContext,
+  initial, adminEmail, theme, brandName, signupContext, styledShell = null,
 }: {
   initial: WelcomeInitial
   adminEmail: string
   theme: Theme
   brandName: string
   signupContext: string
+  /** The site's email design, when it has one; the preview then uses the send
+   *  pipeline's own shell. Null → the legacy preview. */
+  styledShell?: StyledShellOpts | null
 }) {
   const t = theme
   const [subject, setSubject] = useState(initial.subject)
@@ -31,10 +34,15 @@ export default function WelcomeClient({
   const [busy, setBusy] = useState<null | 'save' | 'test'>(null)
   const [flash, setFlash] = useState<Flash>(null)
 
-  const bodyHtml = useMemo(() => markdownToEmailHtml(body, { linkColor: t.accent }), [body, t.accent])
+  const bodyHtml = useMemo(
+    () => markdownToEmailHtml(body, { linkColor: t.accent, style: styledShell?.style }),
+    [body, t.accent, styledShell],
+  )
   const previewHtml = useMemo(
-    () => buildPreviewHtml(subject || '(Subject preview)', bodyHtml, { theme: t, brandName, signupContext }),
-    [subject, bodyHtml, t, brandName, signupContext],
+    () => styledShell
+      ? renderStyledEmailHtml(styledShell, { subject: subject || '(Subject preview)', bodyHtml, unsubscribeUrl: '#' })
+      : buildPreviewHtml(subject || '(Subject preview)', bodyHtml, { theme: t, brandName, signupContext }),
+    [subject, bodyHtml, t, brandName, signupContext, styledShell],
   )
 
   // ── themed style consts (close over `t`) ─────────────────────────

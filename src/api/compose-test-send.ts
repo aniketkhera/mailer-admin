@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { createAuth } from '../lib/auth'
-import { markdownToEmailHtml, renderEmailHtml, sendOne, unsubscribeUrl } from '../lib/email'
+import { emailBodyHtml, renderEmailHtml, sendOne, unsubscribeUrl } from '../lib/email'
 
 export function createTestSendRoute(cfg: MailerConfig) {
   const auth = createAuth(cfg)
@@ -28,7 +28,7 @@ export function createTestSendRoute(cfg: MailerConfig) {
     if (!subject) return NextResponse.json({ error: 'Subject required.' }, { status: 400 })
     if (!body_md) return NextResponse.json({ error: 'Body required.' }, { status: 400 })
 
-    const bodyHtml = markdownToEmailHtml(body_md, { linkColor: cfg.theme.accent })
+    const bodyHtml = emailBodyHtml(cfg, body_md)
     const html = renderEmailHtml(cfg, {
       subject: `[TEST] ${subject}`,
       bodyHtml,

@@ -14,6 +14,7 @@ import { redirect } from 'next/navigation'
 import type { MailerConfig } from '../../config'
 import { createSupabase } from '../../lib/supabase'
 import { createAuth } from '../../lib/auth'
+import { styledShellOpts } from '../../lib/email'
 import { WELCOME_SELECT } from '../../api/welcome'
 import WelcomeClient, { type WelcomeInitial } from './WelcomeClient'
 
@@ -66,6 +67,7 @@ export function createWelcomePage(cfg: MailerConfig) {
           theme={cfg.theme}
           brandName={cfg.brandName}
           signupContext={cfg.email.signupContext || `you signed up at ${cfg.brandName}`}
+          styledShell={styledShellOpts(cfg)}
         />
       </main>
     )

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef } from 'react'
 import type { Theme, Segment, PostListItem } from '../../config'
-import { markdownToEmailHtml } from '../../lib/email'
+import { markdownToEmailHtml, renderStyledEmailHtml, type StyledShellOpts } from '../../lib/email'
 import { valuesFromTags } from '../../lib/segments'
 
 export type RecipientRow = {
@@ -21,7 +21,7 @@ export type PreviewFooter = {
 }
 
 export default function ComposeClient({
-  recipients, loadError, adminEmail, theme, segments, brandName, previewFooter, posts = [],
+  recipients, loadError, adminEmail, theme, segments, brandName, previewFooter, posts = [], styledShell = null,
 }: {
   recipients: RecipientRow[]
   loadError: string | null
@@ -33,6 +33,9 @@ export default function ComposeClient({
   /** OPTIONAL blog posts for the "Send a blog post" mode. Empty/absent →
    *  composer is newsletter-only (the mode toggle + picker don't render). */
   posts?: PostListItem[]
+  /** The site's email design (MailerConfig.email.style), when it has one: the
+   *  preview then uses the send pipeline's own shell. Null → the legacy preview. */
+  styledShell?: StyledShellOpts | null
 }) {
   const t = theme
   const blogEnabled = posts.length > 0
@@ -123,10 +126,15 @@ Questions? Just reply to this email.
     return true
   }), [recipients, search, sourceFilter, segmentFilter, segments])
 
-  const bodyHtml = useMemo(() => markdownToEmailHtml(body, { linkColor: t.accent }), [body, t.accent])
+  const bodyHtml = useMemo(
+    () => markdownToEmailHtml(body, { linkColor: t.accent, style: styledShell?.style }),
+    [body, t.accent, styledShell],
+  )
   const previewHtml = useMemo(
-    () => buildPreviewHtml(subject || '(Subject preview)', bodyHtml, { t, brandName, footer: previewFooter }),
-    [subject, bodyHtml, t, brandName, previewFooter],
+    () => styledShell
+      ? renderStyledEmailHtml(styledShell, { subject: subject || '(Subject preview)', bodyHtml, unsubscribeUrl: '#' })
+      : buildPreviewHtml(subject || '(Subject preview)', bodyHtml, { t, brandName, footer: previewFooter }),
+    [subject, bodyHtml, t, brandName, previewFooter, styledShell],
   )
 
   function insertAtCursor(snippet: string) {

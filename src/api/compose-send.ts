@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { MailerConfig } from '../config'
 import { createSupabase } from '../lib/supabase'
 import { createAuth } from '../lib/auth'
-import { markdownToEmailHtml, sendMailer } from '../lib/email'
+import { emailBodyHtml, sendMailer } from '../lib/email'
 
 export const maxDuration = 60
 
@@ -52,7 +52,7 @@ export function createSendRoute(cfg: MailerConfig) {
     if (ids.length === 0) return NextResponse.json({ error: 'Pick at least one recipient.' }, { status: 400 })
     if (ids.length > 5000) return NextResponse.json({ error: 'Too many recipients (max 5000).' }, { status: 400 })
 
-    const bodyHtml = markdownToEmailHtml(body_md, { linkColor: cfg.theme.accent })
+    const bodyHtml = emailBodyHtml(cfg, body_md)
 
     // Re-fetch recipients server-side. We filter unsubscribed_at IS NULL
     // again here in case someone unsubbed between picker load and send.

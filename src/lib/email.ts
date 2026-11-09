@@ -4,7 +4,7 @@
 // all come from the site's MailerConfig — nothing hardcoded per brand.
 
 import { Resend } from 'resend'
-import type { MailerConfig } from '../config'
+import type { MailerConfig, EmailStyle } from '../config'
 
 // ───────────────────────── Markdown → email-safe HTML ─────────────────────────
 // Tiny Markdown compiler. Emits inline-styled fragment HTML (no <html>/
@@ -43,39 +43,83 @@ const STYLES = {
   videoCaption: 'padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#666;',
 }
 
-function renderInline(text: string, linkColor: string): string {
+type BlockStyles = { [K in keyof typeof STYLES]: string }
+
+/** The site's EmailStyle as per-tag inline styles. Only used when a site sets
+ *  MailerConfig.email.style; the legacy STYLES above stay the default. */
+function styledBlocks(s: EmailStyle): BlockStyles & { strong: string } {
+  const caps = s.uppercaseHeadings ? 'text-transform:uppercase;' : ''
+  return {
+    p:      `margin:0 0 18px 0;font-family:${s.bodyFont};font-size:16px;line-height:1.65;color:${s.text};`,
+    h1:     `margin:8px 0 16px 0;font-family:${s.headingFont};font-size:32px;font-weight:700;color:${s.heading};line-height:1.05;letter-spacing:0.01em;${caps}`,
+    h2:     `margin:28px 0 12px 0;font-family:${s.headingFont};font-size:22px;font-weight:700;color:${s.heading};line-height:1.15;letter-spacing:0.02em;${caps}`,
+    h3:     `margin:8px 0 10px 0;font-family:${s.bodyFont};font-size:12px;font-weight:700;color:${s.accent};line-height:1.3;letter-spacing:0.2em;text-transform:uppercase;`,
+    ul:     `margin:0 0 22px 0;padding:0;list-style:none;font-family:${s.bodyFont};font-size:15px;line-height:1.55;color:${s.text};`,
+    ol:     `margin:0 0 18px 0;padding:0 0 0 22px;font-family:${s.bodyFont};font-size:16px;line-height:1.65;color:${s.text};`,
+    li:     `margin:0;padding:12px 0 12px 22px;border-bottom:1px solid ${s.divider};`,
+    hr:     `border:none;border-top:1px solid ${s.divider};margin:28px 0;`,
+    imgWrap:'margin:18px 0;text-align:center;',
+    img:    'max-width:100%;height:auto;border-radius:8px;display:inline-block;',
+    videoCard:    `display:block;margin:18px 0;border:1px solid ${s.cardBorder};border-radius:12px;overflow:hidden;text-decoration:none;color:inherit;background:${s.footerBg};`,
+    videoThumb:   'display:block;width:100%;max-width:560px;height:auto;',
+    videoCaption: `padding:12px 16px;font-family:${s.bodyFont};font-size:14px;color:${s.mutedText};`,
+    strong: `color:${s.heading};font-weight:700;`,
+  }
+}
+
+/** A "bulletproof" button (table + bgcolor, so Outlook draws it too) for a
+ *  line that is exactly [[Label]](https://…). */
+function buttonHtml(label: string, url: string, bg: string, fg: string, font: string, caps: boolean): string {
+  const safeUrl = escapeHtml(url)
+  const capsCss = caps ? 'text-transform:uppercase;letter-spacing:0.1em;' : ''
+  return [
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 22px 0;"><tr>`,
+    `<td bgcolor="${bg}" style="background:${bg};border-radius:999px;">`,
+    `<a href="${safeUrl}" target="_blank" rel="noopener" style="display:inline-block;padding:14px 26px;font-family:${font};font-size:15px;font-weight:700;${capsCss}color:${fg};text-decoration:none;border-radius:999px;">${escapeHtml(label)}</a>`,
+    `</td></tr></table>`,
+  ].join('')
+}
+
+const BUTTON_RE = /^\[\[([^\]]+)\]\]\(((?:https?:|mailto:)[^)\s]+)\)$/
+
+function renderInline(text: string, linkColor: string, strongStyle?: string): string {
   let out = escapeHtml(text)
   out = out.replace(/\[([^\]]+)\]\(((?:https?:|mailto:)[^)\s]+)\)/g, (_m, label, url) =>
     `<a href="${url}" style="color:${linkColor};text-decoration:underline;" target="_blank" rel="noopener">${label}</a>`)
-  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  out = out.replace(/\*\*([^*]+)\*\*/g, strongStyle ? `<strong style="${strongStyle}">$1</strong>` : '<strong>$1</strong>')
   out = out.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
   return out
 }
 
-function youtubeCard(videoId: string, originalUrl: string): string {
+function youtubeCard(videoId: string, originalUrl: string, S: BlockStyles = STYLES): string {
   const thumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
   const watch = `https://www.youtube.com/watch?v=${videoId}`
   return [
-    `<a href="${watch}" target="_blank" rel="noopener" style="${STYLES.videoCard}">`,
-    `<img src="${thumb}" alt="Watch on YouTube" style="${STYLES.videoThumb}" />`,
-    `<div style="${STYLES.videoCaption}">▶  Watch on YouTube</div>`,
+    `<a href="${watch}" target="_blank" rel="noopener" style="${S.videoCard}">`,
+    `<img src="${thumb}" alt="Watch on YouTube" style="${S.videoThumb}" />`,
+    `<div style="${S.videoCaption}">▶  Watch on YouTube</div>`,
     `</a>`,
     `<!-- ${escapeHtml(originalUrl)} -->`,
   ].join('')
 }
 
-function vimeoCard(videoId: string, originalUrl: string): string {
+function vimeoCard(videoId: string, originalUrl: string, S: BlockStyles = STYLES): string {
   const watch = `https://vimeo.com/${videoId}`
   return [
-    `<a href="${watch}" target="_blank" rel="noopener" style="${STYLES.videoCard}">`,
-    `<div style="${STYLES.videoCaption}">▶  Watch on Vimeo — ${watch}</div>`,
+    `<a href="${watch}" target="_blank" rel="noopener" style="${S.videoCard}">`,
+    `<div style="${S.videoCaption}">▶  Watch on Vimeo — ${watch}</div>`,
     `</a>`,
     `<!-- ${escapeHtml(originalUrl)} -->`,
   ].join('')
 }
 
-export function markdownToEmailHtml(md: string, opts: { linkColor?: string } = {}): string {
-  const linkColor = opts.linkColor || '#F37A4A'
+export function markdownToEmailHtml(md: string, opts: { linkColor?: string; style?: EmailStyle } = {}): string {
+  const style = opts.style
+  // With a site style, links + bullets use its accent; without one, exactly as before.
+  const linkColor = style ? (opts.linkColor || style.accent) : (opts.linkColor || '#F37A4A')
+  const S: BlockStyles = style ? styledBlocks(style) : STYLES
+  const strong = style ? styledBlocks(style).strong : undefined
+  const inline = (t: string) => renderInline(t, linkColor, strong)
   const lines = md.replace(/\r\n/g, '\n').split('\n')
   const out: string[] = []
 
@@ -86,13 +130,21 @@ export function markdownToEmailHtml(md: string, opts: { linkColor?: string } = {
 
     if (!trimmed) { i++; continue }
 
-    if (/^---+$/.test(trimmed)) { out.push(`<hr style="${STYLES.hr}" />`); i++; continue }
+    if (/^---+$/.test(trimmed)) { out.push(`<hr style="${S.hr}" />`); i++; continue }
 
     let m: RegExpMatchArray | null
     if ((m = trimmed.match(/^(#{1,3})\s+(.+)$/))) {
       const level = m[1].length
       const tag = `h${level}` as 'h1' | 'h2' | 'h3'
-      out.push(`<${tag} style="${STYLES[tag]}">${renderInline(m[2], linkColor)}</${tag}>`)
+      out.push(`<${tag} style="${S[tag]}">${inline(m[2])}</${tag}>`)
+      i++; continue
+    }
+
+    if ((m = trimmed.match(BUTTON_RE))) {
+      const bg = style ? style.buttonBg : linkColor
+      const fg = style ? style.buttonText : '#FFFFFF'
+      const font = style ? style.headingFont : 'Arial,Helvetica,sans-serif'
+      out.push(buttonHtml(m[1], m[2], bg, fg, font, !!style?.uppercaseHeadings))
       i++; continue
     }
 
@@ -102,41 +154,46 @@ export function markdownToEmailHtml(md: string, opts: { linkColor?: string } = {
       // renderInline), so an embedded quote would otherwise break out of the
       // src="" attribute and inject arbitrary attributes (e.g. onerror).
       const src = escapeHtml(m[2])
-      out.push(`<div style="${STYLES.imgWrap}"><img src="${src}" alt="${alt}" style="${STYLES.img}" /></div>`)
+      out.push(`<div style="${S.imgWrap}"><img src="${src}" alt="${alt}" style="${S.img}" /></div>`)
       i++; continue
     }
 
-    if ((m = trimmed.match(YOUTUBE_RE))) { out.push(youtubeCard(m[1], trimmed)); i++; continue }
-    if ((m = trimmed.match(VIMEO_RE)))   { out.push(vimeoCard(m[1], trimmed));   i++; continue }
+    if ((m = trimmed.match(YOUTUBE_RE))) { out.push(youtubeCard(m[1], trimmed, S)); i++; continue }
+    if ((m = trimmed.match(VIMEO_RE)))   { out.push(vimeoCard(m[1], trimmed, S));   i++; continue }
 
     if (/^[-*]\s+/.test(trimmed)) {
       const items: string[] = []
       while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
-        items.push(`<li style="${STYLES.li}">${renderInline(lines[i].trim().replace(/^[-*]\s+/, ''), linkColor)}</li>`)
+        const text = inline(lines[i].trim().replace(/^[-*]\s+/, ''))
+        // Styled lists draw their own accent dot (list-style:none on the <ul>), so the
+        // bullet colour matches the brand in every client, Outlook included.
+        items.push(style
+          ? `<li style="${S.li}${items.length === 0 ? `border-top:1px solid ${style.divider};` : ''}"><span style="display:inline-block;width:22px;margin-left:-22px;color:${style.accent};font-size:14px;">&#9679;</span>${text}</li>`
+          : `<li style="${S.li}">${text}</li>`)
         i++
       }
-      out.push(`<ul style="${STYLES.ul}">${items.join('')}</ul>`)
+      out.push(`<ul style="${S.ul}">${items.join('')}</ul>`)
       continue
     }
 
     if (/^\d+\.\s+/.test(trimmed)) {
       const items: string[] = []
       while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-        items.push(`<li style="${STYLES.li}">${renderInline(lines[i].trim().replace(/^\d+\.\s+/, ''), linkColor)}</li>`)
+        items.push(`<li style="${S.li}">${inline(lines[i].trim().replace(/^\d+\.\s+/, ''))}</li>`)
         i++
       }
-      out.push(`<ol style="${STYLES.ol}">${items.join('')}</ol>`)
+      out.push(`<ol style="${S.ol}">${items.join('')}</ol>`)
       continue
     }
 
     const para: string[] = [line]
     i++
     while (i < lines.length && lines[i].trim() && !/^(#{1,3}\s|---+$|[-*]\s|\d+\.\s|!\[)/.test(lines[i].trim())) {
-      if (YOUTUBE_RE.test(lines[i].trim()) || VIMEO_RE.test(lines[i].trim())) break
+      if (YOUTUBE_RE.test(lines[i].trim()) || VIMEO_RE.test(lines[i].trim()) || BUTTON_RE.test(lines[i].trim())) break
       para.push(lines[i])
       i++
     }
-    out.push(`<p style="${STYLES.p}">${renderInline(para.join(' ').trim(), linkColor)}</p>`)
+    out.push(`<p style="${S.p}">${inline(para.join(' ').trim())}</p>`)
   }
 
   return out.join('\n')
@@ -150,7 +207,112 @@ export type EmailShellArgs = {
   unsubscribeUrl: string
 }
 
+/** Markdown → body HTML in this site's email design. Every send path and
+ *  preview should use this rather than calling markdownToEmailHtml with only a
+ *  link colour, so a site with email.style never gets light-theme body text
+ *  inside a dark card. Without a style it is exactly the old call. */
+export function emailBodyHtml(cfg: Pick<MailerConfig, 'theme' | 'email'>, md: string): string {
+  return markdownToEmailHtml(md, { linkColor: cfg.theme.accent, style: cfg.email.style })
+}
+
+/** The plain, serialisable details the styled shell needs, so admin previews
+ *  (client components, which can't receive the whole config) render the very
+ *  same HTML the send pipeline does. */
+export type StyledShellOpts = {
+  style: EmailStyle
+  brandName: string
+  physicalAddress: string
+  signupContext: string
+  contactEmail?: string | null
+  logoUrl?: string | null
+}
+
+export function styledShellOpts(cfg: MailerConfig): StyledShellOpts | null {
+  if (!cfg.email.style) return null
+  return {
+    style: cfg.email.style,
+    brandName: cfg.brandName,
+    physicalAddress: cfg.email.physicalAddress,
+    signupContext: cfg.email.signupContext || `you signed up at ${cfg.brandName}`,
+    contactEmail: cfg.email.contactEmail || null,
+    logoUrl: cfg.email.logoUrl || null,
+  }
+}
+
+/** The site-designed email shell (MailerConfig.email.style). Table layout with
+ *  bgcolor attributes, so the colours hold in Gmail and Outlook as well. */
+export function renderStyledEmailHtml(o: StyledShellOpts, args: EmailShellArgs): string {
+  const { subject, bodyHtml, unsubscribeUrl } = args
+  const s = o.style
+  const brand = escapeHtml(o.brandName)
+  const caps = s.uppercaseHeadings ? 'text-transform:uppercase;' : ''
+  const scheme = s.colorScheme === 'dark' ? 'dark' : 'light'
+  const fonts = s.fontsUrl ? `\n  <link href="${escapeHtml(s.fontsUrl)}" rel="stylesheet" />` : ''
+  const logo = o.logoUrl
+    ? `<td width="58" valign="middle" style="width:58px;padding:0 14px 0 0;"><img src="${escapeHtml(o.logoUrl)}" alt="${brand}" width="58" height="58" style="display:block;border:0;outline:none;text-decoration:none;width:58px;height:58px;border-radius:50%;" /></td>`
+    : ''
+  const tagline = s.tagline
+    ? `<div style="margin-top:5px;font-family:${s.bodyFont};font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:${s.accent};">${escapeHtml(s.tagline)}</div>`
+    : ''
+  const contact = o.contactEmail
+    ? ` &nbsp;&middot;&nbsp; <a href="mailto:${escapeHtml(o.contactEmail)}" style="color:${s.mutedText};text-decoration:underline;">Contact us</a>`
+    : ''
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="${scheme}" />
+  <meta name="supported-color-schemes" content="${scheme}" />
+  <title>${escapeHtml(subject)}</title>${fonts}
+  <style>:root{color-scheme:${scheme};supported-color-schemes:${scheme};}</style>
+</head>
+<body bgcolor="${s.pageBg}" style="margin:0;padding:0;background:${s.pageBg};">
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;mso-hide:all;">
+    ${stripTags(bodyHtml).slice(0, 140)}
+  </div>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="${s.pageBg}" style="background:${s.pageBg};">
+    <tr><td align="center" style="padding:28px 12px;">
+
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" bgcolor="${s.cardBg}" style="max-width:600px;width:100%;background:${s.cardBg};border:1px solid ${s.cardBorder};border-radius:16px;overflow:hidden;">
+
+        <tr><td style="padding:26px 32px 22px 32px;border-bottom:1px solid ${s.divider};">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+            ${logo}<td valign="middle">
+              <div style="font-family:${s.headingFont};font-size:19px;font-weight:700;letter-spacing:0.14em;${caps}color:${s.brandColor};line-height:1.1;">${brand}</div>${tagline}
+            </td>
+          </tr></table>
+        </td></tr>
+
+        <tr><td style="padding:28px 32px 10px 32px;font-family:${s.bodyFont};color:${s.text};">
+          ${bodyHtml}
+        </td></tr>
+
+        <tr><td bgcolor="${s.footerBg}" style="padding:22px 32px 26px 32px;border-top:1px solid ${s.divider};background:${s.footerBg};">
+          <div style="font-family:${s.bodyFont};font-size:12px;line-height:1.7;color:${s.mutedText};">
+            <p style="margin:0 0 8px 0;">
+              <strong style="font-family:${s.headingFont};font-weight:600;letter-spacing:0.12em;${caps}color:${s.heading};">${brand}</strong><br />
+              ${escapeHtml(o.physicalAddress)}
+            </p>
+            <p style="margin:8px 0 0 0;">
+              You&rsquo;re receiving this because ${escapeHtml(o.signupContext)}.<br />
+              <a href="${unsubscribeUrl}" style="color:${s.mutedText};text-decoration:underline;">Unsubscribe</a>${contact}
+            </p>
+          </div>
+        </td></tr>
+
+      </table>
+
+    </td></tr>
+  </table>
+</body>
+</html>`
+}
+
 export function renderEmailHtml(cfg: MailerConfig, args: EmailShellArgs): string {
+  const styled = styledShellOpts(cfg)
+  if (styled) return renderStyledEmailHtml(styled, args)
   const { subject, bodyHtml, unsubscribeUrl } = args
   const brand = cfg.brandName
   const bg = cfg.theme.pageBg

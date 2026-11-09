@@ -20,6 +20,35 @@ export type Theme = {
   rowHover: string     // table row hover background
 }
 
+/** A site's own email design (MailerConfig.email.style). Every colour is a
+ *  plain hex; fonts are CSS font-family stacks. Web fonts named in
+ *  `fontsUrl` load in the clients that allow them (Apple Mail, iOS) and the
+ *  stacks fall back to system fonts everywhere else (Gmail, Outlook). */
+export type EmailStyle = {
+  /** 'dark' declares the email as dark so clients don't invert it. */
+  colorScheme: 'light' | 'dark'
+  pageBg: string      // behind the card
+  cardBg: string      // the card
+  cardBorder: string
+  divider: string     // lines between header, body, list rows, footer
+  footerBg: string
+  heading: string     // h1–h3 and **bold**
+  text: string        // paragraphs and list items
+  mutedText: string   // footer text
+  brandColor: string  // the brand name in the header
+  accent: string      // links, list bullets, the tagline, h3 kickers
+  buttonBg: string    // [[Label]](url) buttons
+  buttonText: string
+  headingFont: string // e.g. "Oswald,'Arial Narrow',Arial,sans-serif"
+  bodyFont: string    // e.g. "Barlow,Helvetica,Arial,sans-serif"
+  /** Uppercase h1/h2, the brand name and buttons (a condensed-caps look). */
+  uppercaseHeadings?: boolean
+  /** Optional Google Fonts stylesheet URL for the two fonts above. */
+  fontsUrl?: string
+  /** Small line under the brand name in the header, e.g. "Open 24x7 · Exton, PA". */
+  tagline?: string
+}
+
 export type Segment = {
   key: string        // 'sport'
   namespace: string  // 'sport:'  (stored in subscribers.tags[] as `${namespace}${value}`)
@@ -68,6 +97,12 @@ export type MailerConfig = {
      *  the brand name. Must be a full https:// URL (email clients can't resolve
      *  relative paths). Omit → header shows the brand-name text only (unchanged). */
     logoUrl?: string
+    /** OPTIONAL full design for every email this site sends (newsletters, the
+     *  welcome, test sends) and for the admin previews of them. Omit → the
+     *  original light card, byte-for-byte unchanged. Set it when a brand's
+     *  emails should look like its website rather than the shared default —
+     *  e.g. Exton's dark navy + ember (extonsports-v1, 2026-11-09). */
+    style?: EmailStyle
   }
   theme: Theme
   /** Tag-segments surfaced in the admin (e.g. sport interest). Default: none → the UI hides. */
