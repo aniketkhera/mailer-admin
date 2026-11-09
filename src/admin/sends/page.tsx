@@ -12,6 +12,7 @@ import { redirect } from 'next/navigation'
 import type { MailerConfig } from '../../config'
 import { createSupabase } from '../../lib/supabase'
 import { createAuth } from '../../lib/auth'
+import { styledShellOpts } from '../../lib/email'
 import SendsClient, { type MailerRow } from './SendsClient'
 
 export const MAILERS_SELECT =
@@ -45,7 +46,7 @@ export function createSendsPage(cfg: MailerConfig) {
 
     return (
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px' }}>
-        <SendsClient rows={rows} loadError={loadError} theme={cfg.theme} />
+        <SendsClient rows={rows} loadError={loadError} theme={cfg.theme} styledShell={styledShellOpts(cfg)} />
       </main>
     )
   }

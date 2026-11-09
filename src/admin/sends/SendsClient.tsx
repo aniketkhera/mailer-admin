@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { Theme } from '../../config'
+import { renderStyledEmailHtml, type StyledShellOpts } from '../../lib/email'
 
 export type MailerRow = {
   id: string
@@ -16,7 +17,11 @@ export type MailerRow = {
   send_errors: unknown[] | null
 }
 
-export default function SendsClient({ rows, loadError, theme }: { rows: MailerRow[]; loadError: string | null; theme: Theme }) {
+export default function SendsClient({ rows, loadError, theme, styledShell = null }: {
+  rows: MailerRow[]; loadError: string | null; theme: Theme
+  /** The site's email design, when it has one: a past send is shown in it, as sent. */
+  styledShell?: StyledShellOpts | null
+}) {
   const t = theme
   const [openId, setOpenId] = useState<string | null>(null)
   const open = openId ? rows.find(r => r.id === openId) : null
@@ -86,12 +91,12 @@ export default function SendsClient({ rows, loadError, theme }: { rows: MailerRo
         </table>
       </div>
 
-      {open && <DetailModal row={open} onClose={() => setOpenId(null)} t={t} />}
+      {open && <DetailModal row={open} onClose={() => setOpenId(null)} t={t} styledShell={styledShell} />}
     </div>
   )
 }
 
-function DetailModal({ row, onClose, t }: { row: MailerRow; onClose: () => void; t: Theme }) {
+function DetailModal({ row, onClose, t, styledShell }: { row: MailerRow; onClose: () => void; t: Theme; styledShell: StyledShellOpts | null }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 100 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: t.panelBg, borderRadius: 14, padding: 24, maxWidth: 820, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
@@ -137,7 +142,12 @@ function DetailModal({ row, onClose, t }: { row: MailerRow; onClose: () => void;
 
         <div style={{ flex: 1, border: `1px solid ${t.border}`, borderRadius: 10, overflow: 'hidden', minHeight: 0 }}>
           <iframe
-            srcDoc={row.body_html}
+            srcDoc={styledShell && row.body_html.includes(`color:${styledShell.style.text};`)
+              // A send made with the site's style stored a styled fragment (light text for a
+              // dark card): wrap it in that shell, or it is unreadable on the admin's
+              // background. Sends from before the style keep their own, light, look.
+              ? renderStyledEmailHtml(styledShell, { subject: row.subject, bodyHtml: row.body_html, unsubscribeUrl: '#' })
+              : row.body_html}
             sandbox="allow-popups"
             style={{ width: '100%', height: '100%', minHeight: 360, border: 'none', background: t.pageBg }}
             title={row.subject}

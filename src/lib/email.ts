@@ -113,10 +113,14 @@ function vimeoCard(videoId: string, originalUrl: string, S: BlockStyles = STYLES
   ].join('')
 }
 
-export function markdownToEmailHtml(md: string, opts: { linkColor?: string; style?: EmailStyle } = {}): string {
+export function markdownToEmailHtml(
+  md: string,
+  opts: { linkColor?: string; style?: EmailStyle; /** text on unstyled [[buttons]]; default white */ buttonText?: string } = {},
+): string {
   const style = opts.style
-  // With a site style, links + bullets use its accent; without one, exactly as before.
-  const linkColor = style ? (opts.linkColor || style.accent) : (opts.linkColor || '#F37A4A')
+  // With a site style, links, bullets and kickers all use its accent (one orange, not two);
+  // without one, exactly as before.
+  const linkColor = style ? style.accent : (opts.linkColor || '#F37A4A')
   const S: BlockStyles = style ? styledBlocks(style) : STYLES
   const strong = style ? styledBlocks(style).strong : undefined
   const inline = (t: string) => renderInline(t, linkColor, strong)
@@ -142,7 +146,7 @@ export function markdownToEmailHtml(md: string, opts: { linkColor?: string; styl
 
     if ((m = trimmed.match(BUTTON_RE))) {
       const bg = style ? style.buttonBg : linkColor
-      const fg = style ? style.buttonText : '#FFFFFF'
+      const fg = style ? style.buttonText : (opts.buttonText || '#FFFFFF')
       const font = style ? style.headingFont : 'Arial,Helvetica,sans-serif'
       out.push(buttonHtml(m[1], m[2], bg, fg, font, !!style?.uppercaseHeadings))
       i++; continue
@@ -212,7 +216,7 @@ export type EmailShellArgs = {
  *  link colour, so a site with email.style never gets light-theme body text
  *  inside a dark card. Without a style it is exactly the old call. */
 export function emailBodyHtml(cfg: Pick<MailerConfig, 'theme' | 'email'>, md: string): string {
-  return markdownToEmailHtml(md, { linkColor: cfg.theme.accent, style: cfg.email.style })
+  return markdownToEmailHtml(md, { linkColor: cfg.theme.accent, buttonText: cfg.theme.accentText, style: cfg.email.style })
 }
 
 /** The plain, serialisable details the styled shell needs, so admin previews

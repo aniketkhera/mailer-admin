@@ -127,8 +127,8 @@ Questions? Just reply to this email.
   }), [recipients, search, sourceFilter, segmentFilter, segments])
 
   const bodyHtml = useMemo(
-    () => markdownToEmailHtml(body, { linkColor: t.accent, style: styledShell?.style }),
-    [body, t.accent, styledShell],
+    () => markdownToEmailHtml(body, { linkColor: t.accent, buttonText: t.accentText, style: styledShell?.style }),
+    [body, t.accent, t.accentText, styledShell],
   )
   const previewHtml = useMemo(
     () => styledShell

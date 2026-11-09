@@ -35,8 +35,8 @@ export default function WelcomeClient({
   const [flash, setFlash] = useState<Flash>(null)
 
   const bodyHtml = useMemo(
-    () => markdownToEmailHtml(body, { linkColor: t.accent, style: styledShell?.style }),
-    [body, t.accent, styledShell],
+    () => markdownToEmailHtml(body, { linkColor: t.accent, buttonText: t.accentText, style: styledShell?.style }),
+    [body, t.accent, t.accentText, styledShell],
   )
   const previewHtml = useMemo(
     () => styledShell
